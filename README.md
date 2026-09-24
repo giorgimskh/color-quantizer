@@ -48,9 +48,14 @@ Done in 0.3s
     ████ #bba0bc    2.0%
     ...
 
-Try another k? (Enter to quit) 24
+Next: type a number for a new k, i to change the image, or Enter to quit: 24
 ...
-Try another k? (Enter to quit)
+Next: type a number for a new k, i to change the image, or Enter to quit: i
+Image path: ~/Pictures/galaxy.png
+Loaded galaxy.png: 1920x1080 pixels, 20,741 distinct colors
+How many colors (k)? [24]                 <- Enter keeps the same k
+...
+Next: type a number for a new k, i to change the image, or Enter to quit:
 Bye!
 ```
 Tips: you can drag an image into the terminal to paste its path; press Enter
@@ -73,7 +78,7 @@ quantize input.jpg -k 8 -o output.png [--seed 0] [--palette] [--show]
 | `--palette` | also save `<output>_palette.png` (swatch strip, most-used color first) |
 | `--no-compare` | skip saving `<output>_compare.png` (original left, reconstructed right; saved by default) |
 | `--show` | open the side-by-side comparison in your image viewer |
-| `-i`, `--interactive` | after each result, offer to try another k |
+| `-i`, `--interactive` | after each result, offer to try another k or change the image |
 | `-q`, `--quiet` | print only saved files and errors (no progress or stats) |
 
 ## How it works

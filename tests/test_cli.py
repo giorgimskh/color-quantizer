@@ -218,7 +218,7 @@ def test_interactive_flag_names_extra_outputs_after_custom_output(tmp_path, inpu
     prompts = answers("n", "2", "")  # no viewer, then k=2, then quit
     assert main([str(input_image), "-k", "4", "-o", str(out), "-i", "--no-compare"]) == 0
     assert out.exists() and (tmp_path / "art_k2.png").exists()
-    assert "Try another k? (Enter to quit) " in prompts[1]
+    assert prompts[1].startswith("\nNext: type a number for a new k, i to change the image")
 
 
 def test_cancel_at_first_question_returns_error(tmp_path, input_image, answers, capsys):
@@ -294,3 +294,68 @@ def test_no_intro_when_quiet(tmp_path, input_image, answers, capsys):
 def test_no_intro_when_all_arguments_given(tmp_path, input_image, capsys, no_input):
     main([str(input_image), "-k", "3", "-o", str(tmp_path / "q.png")])
     assert "What it does" not in capsys.readouterr().out
+
+
+# --- Changing the image between rounds -----------------------------------------
+
+
+@pytest.fixture
+def second_image(tmp_path):
+    path = tmp_path / "other.png"
+    img = np.zeros((10, 12, 3), np.uint8)
+    img[:, 6:] = [250, 10, 10]
+    save_image(img, path)
+    return path
+
+
+def test_change_image_after_a_result(tmp_path, input_image, second_image, answers, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompts = answers(
+        str(input_image), "3", "", "n", "n",  # first round: in.png, k=3
+        "i",  # change image
+        "nope.png",  # bad path -> asked again
+        str(second_image),
+        "",  # keep k=3
+        "2",  # same image, new k
+        "",  # quit
+    )
+    assert main([]) == 0
+    assert "How many colors (k)? [3] " in prompts
+    for name in ["in_k3.png", "other_k3.png", "other_k2.png"]:
+        assert (tmp_path / name).exists(), name
+    assert not (tmp_path / "in_k2.png").exists()
+    np.testing.assert_array_equal(load_image(tmp_path / "other_k2.png")[0, [0, 11]],
+                                  [[0, 0, 0], [250, 10, 10]])
+    out = capsys.readouterr().out
+    assert "Loaded other.png: 12x10 pixels, 2 distinct colors" in out
+    assert "Bye!" in out
+
+
+def test_change_image_after_custom_output_uses_default_names(
+    tmp_path, input_image, second_image, answers, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    answers("n", "i", str(second_image), "4", "")
+    assert main([str(input_image), "-k", "2", "-o", "art.png", "-i", "--no-compare"]) == 0
+    assert (tmp_path / "art.png").exists()
+    assert (tmp_path / "other_k4.png").exists()
+
+
+def test_next_menu_rejects_unknown_choice(tmp_path, input_image, answers, capsys):
+    answers("n", "xyz", "0", "q")
+    assert main([str(input_image), "-k", "2", "-o", str(tmp_path / "q.png"), "-i"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err.count("is not a choice") == 2
+    assert "Bye!" in captured.out
+
+
+def test_ctrl_c_while_changing_image_quits_cleanly(tmp_path, input_image, answers, capsys):
+    answers("n", "i", KeyboardInterrupt())
+    assert main([str(input_image), "-k", "2", "-o", str(tmp_path / "q.png"), "-i"]) == 0
+    assert "Bye!" in capsys.readouterr().out
+
+
+def test_intro_mentions_changing_image(tmp_path, input_image, answers, capsys):
+    answers("3", "n", "")
+    main([str(input_image), "-o", str(tmp_path / "q.png")])
+    assert "type i to switch to another" in capsys.readouterr().out

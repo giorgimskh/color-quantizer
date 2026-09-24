@@ -62,17 +62,17 @@ def parse_k(text: str) -> int:
     return k
 
 
-def ask_k(prompt: str = "How many colors (k)? ", allow_empty: bool = False) -> int | None:
+def ask_k(prompt: str = "How many colors (k)? ", default: int | None = None) -> int:
     """Ask for k until a valid value is given.
 
     Args:
         prompt: Question shown to the user.
-        allow_empty: If True, an empty answer returns None (used to quit).
+        default: Value returned for an empty answer; if None, an answer is required.
     """
     while True:
         answer = ask(prompt)
-        if not answer and allow_empty:
-            return None
+        if not answer and default is not None:
+            return default
         try:
             return parse_k(answer)
         except ValueError as exc:
@@ -109,3 +109,24 @@ def ask_output(default: Path) -> Path:
         if path.suffix.lower() in extensions:
             return path
         _complain(f"Unknown image format {path.suffix or '(none)'!r}; use e.g. .png or .jpg.")
+
+
+NEXT_PROMPT = "\nNext: type a number for a new k, i to change the image, or Enter to quit: "
+
+
+def ask_next() -> int | str | None:
+    """Ask what to do after a result.
+
+    Returns:
+        A new k (int), ``"image"`` to switch to another image, or None to quit.
+    """
+    while True:
+        answer = ask(NEXT_PROMPT).lower()
+        if answer in ("", "q", "quit"):
+            return None
+        if answer in ("i", "image"):
+            return "image"
+        try:
+            return parse_k(answer)
+        except ValueError:
+            _complain(f"{answer!r} is not a choice. Type a number (e.g. 16), i, or press Enter.")

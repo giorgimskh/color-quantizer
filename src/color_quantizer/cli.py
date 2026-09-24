@@ -20,6 +20,7 @@ from color_quantizer.interactive import (
     Cancelled,
     ask_image,
     ask_k,
+    ask_next,
     ask_output,
     ask_yes_no,
     parse_k,
@@ -79,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-i",
         "--interactive",
         action="store_true",
-        help="after each result, offer to try another k",
+        help="after each result, offer to try another k or change the image",
     )
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="only print saved files and errors"
@@ -147,7 +148,8 @@ def build_intro(args: argparse.Namespace) -> str:
         lines.append(f"  <output>_palette.png   the k colors as swatches{note}")
     lines += [
         "",
-        "After each result you can try another k. Ctrl+C quits at any time.",
+        "After each result you can try another k, or type i to switch to another",
+        "image. Ctrl+C quits at any time.",
         "All options, for use without questions: quantize --help",
         "",
     ]
@@ -178,6 +180,13 @@ class Session:
         self.input_path = input_path
         self.n_pixels = image.shape[0] * image.shape[1]
         self.n_colors = count_colors(image)
+
+    def describe(self) -> None:
+        """Print the loaded image's size and color count."""
+        self.say(
+            f"Loaded {self.input_path.name}: {self.image.shape[1]}x{self.image.shape[0]} "
+            f"pixels, {self.n_colors:,} distinct colors"
+        )
 
     def say(self, message: str = "") -> None:
         """Print progress/stats unless --quiet."""
@@ -238,10 +247,7 @@ def run(args: argparse.Namespace) -> int:
     else:
         input_path, image = args.input, load_image(args.input)
     session = Session(args, image, input_path)
-    session.say(
-        f"Loaded {input_path.name}: {image.shape[1]}x{image.shape[0]} pixels, "
-        f"{session.n_colors:,} distinct colors"
-    )
+    session.describe()
 
     k = args.colors if args.colors is not None else ask_k()
     k = session.clamp_k(k)
@@ -256,13 +262,22 @@ def run(args: argparse.Namespace) -> int:
         if not interactive:
             return 0
         try:
-            next_k = ask_k("\nTry another k? (Enter to quit) ", allow_empty=True)
+            choice = ask_next()
+            if choice == "image":
+                input_path, image = ask_image()
+                session = Session(args, image, input_path)
+                session.describe()
+                k = ask_k(f"How many colors (k)? [{k}] ", default=k)
+                # Name outputs after the new image so earlier results are kept.
+                output_is_default = True
+            elif choice is not None:
+                k = choice
         except Cancelled:
-            next_k = None
-        if next_k is None:
+            choice = None
+        if choice is None:
             print("Bye!")
             return 0
-        k = session.clamp_k(next_k)
+        k = session.clamp_k(k)
         if output_is_default:
             output = default_output(input_path, k)
         else:
