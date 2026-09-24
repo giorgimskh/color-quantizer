@@ -189,11 +189,12 @@ def test_bad_arguments_exit_2(argv):
 
 KEEP = ""  # Enter: keep options / accept default
 QUIT = "4"  # "What next?" menu: Quit
+DELETE_ALL = ""  # keep list at quit: Enter deletes all
 
 
 def test_k_prompted_when_omitted(tmp_path, input_image, answers, capsys):
     out = tmp_path / "q.png"
-    answers("abc", "0", " 3 ", KEEP, QUIT)  # two bad k's, k=3
+    answers("abc", "0", " 3 ", KEEP, QUIT, DELETE_ALL)  # two bad k's, k=3
     assert main([str(input_image), "-o", str(out), "--seed", "0"]) == 0
     assert n_colors(out) <= 3
     captured = capsys.readouterr()
@@ -211,7 +212,7 @@ def test_full_wizard(tmp_path, input_image, answers, capsys, monkeypatch, viewer
         "5",  # k
         "3",  # options: palette on (viewer is on by default)
         "1", "2",  # What next -> another k: 2
-        snapshot(tmp_path / "output", during, QUIT),
+        snapshot(tmp_path / "output", during, QUIT), DELETE_ALL,
     )
     assert main([]) == 0
     assert prompts[:2] == ["Image path: ", "Image path: "]
@@ -228,7 +229,7 @@ def test_full_wizard(tmp_path, input_image, answers, capsys, monkeypatch, viewer
 
 
 def test_options_list_shown_after_k(tmp_path, input_image, answers, capsys):
-    prompts = answers("3", KEEP, QUIT)
+    prompts = answers("3", KEEP, QUIT, DELETE_ALL)
     main([str(input_image), "-o", str(tmp_path / "q.png")])
     out = capsys.readouterr().out
     for line in ["1. Random seed", "2. Max k-means iterations", "3. Save palette image",
@@ -263,13 +264,13 @@ def test_options_multiple_choices_with_values(tmp_path, input_image, answers, ca
 def test_options_seed_makes_rounds_reproducible(tmp_path, input_image, answers):
     a, b = tmp_path / "a.png", tmp_path / "b.png"
     for out in (a, b):
-        answers("4", "1", "11", QUIT)
+        answers("4", "1", "11", QUIT, DELETE_ALL)
         main([str(input_image), "-o", str(out)])
     np.testing.assert_array_equal(load_image(a), load_image(b))
 
 
 def test_cli_flags_preset_options(tmp_path, input_image, answers, capsys):
-    answers("3", KEEP, QUIT)
+    answers("3", KEEP, QUIT, DELETE_ALL)
     main([str(input_image), "-o", str(tmp_path / "q.png"), "--seed", "5", "--palette", "--no-compare"])
     out = capsys.readouterr().out
     assert "(now: 5)" in out
@@ -278,7 +279,7 @@ def test_cli_flags_preset_options(tmp_path, input_image, answers, capsys):
 
 
 def test_what_next_menu_is_numbered(tmp_path, input_image, answers, capsys):
-    prompts = answers("3", KEEP, "0", "abc", QUIT)
+    prompts = answers("3", KEEP, "0", "abc", QUIT, DELETE_ALL)
     assert main([str(input_image), "-o", str(tmp_path / "q.png")]) == 0
     captured = capsys.readouterr()
     for line in ["What next?", "1. Try a different number of colors (k)",
@@ -295,7 +296,7 @@ def test_what_next_change_options_then_run(tmp_path, input_image, answers):
         "4", KEEP,  # first round: k=4, default options
         "3", "3",  # What next -> change options -> palette on
         "1", KEEP,  # What next -> another k, Enter keeps k=4
-        snapshot(tmp_path, during, QUIT),
+        snapshot(tmp_path, during, QUIT), DELETE_ALL,
     )
     assert main([str(input_image), "-o", str(out)]) == 0
     assert {"q_k4.png", "q_k4_palette.png"} <= set(during["files"])
@@ -307,7 +308,7 @@ def test_what_next_change_options_then_run(tmp_path, input_image, answers):
 def test_interactive_flag_names_extra_outputs_after_custom_output(tmp_path, input_image, answers):
     out = tmp_path / "art.png"
     during = {}
-    prompts = answers(KEEP, "1", "2", snapshot(tmp_path, during, QUIT))
+    prompts = answers(KEEP, "1", "2", snapshot(tmp_path, during, QUIT), DELETE_ALL)
     assert main([str(input_image), "-k", "4", "-o", str(out), "-i", "--no-compare"]) == 0
     assert {"art.png", "art_k2.png"} <= set(during["files"])
     assert out.exists() and not (tmp_path / "art_k2.png").exists()
@@ -358,7 +359,7 @@ def test_change_image_after_a_result(tmp_path, input_image, second_image, answer
         str(second_image),
         KEEP,  # keep k=3
         "1", "2",  # What next -> another k: 2
-        snapshot(tmp_path / "output", during, QUIT),
+        snapshot(tmp_path / "output", during, QUIT), DELETE_ALL,
     )
     assert main([]) == 0
     assert "How many colors (k)? [3] " in prompts
@@ -378,7 +379,7 @@ def test_change_image_result_colors(tmp_path, second_image, answers, monkeypatch
         grabbed["img"] = load_image(tmp_path / "output" / "other_k2.png")
         return QUIT
 
-    answers(str(second_image), "2", KEEP, grab)
+    answers(str(second_image), "2", KEEP, grab, DELETE_ALL)
     assert main([]) == 0
     np.testing.assert_array_equal(grabbed["img"][0, [0, 11]], [[0, 0, 0], [250, 10, 10]])
 
@@ -388,7 +389,7 @@ def test_change_image_after_custom_output_uses_default_names(
 ):
     monkeypatch.chdir(tmp_path)
     during = {}
-    answers(KEEP, "2", str(second_image), "4", snapshot(tmp_path / "output", during, QUIT))
+    answers(KEEP, "2", str(second_image), "4", snapshot(tmp_path / "output", during, QUIT), DELETE_ALL)
     assert main([str(input_image), "-k", "2", "-o", "art.png", "-i", "--no-compare"]) == 0
     assert "other_k4.png" in during["files"]
     assert (tmp_path / "art.png").exists()
@@ -407,7 +408,7 @@ def test_ctrl_c_while_changing_image_quits_cleanly(tmp_path, input_image, answer
 def test_intro_printed_before_first_question(tmp_path, input_image, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     seen_before_first_prompt = []
-    replies = iter([str(input_image), "2", KEEP, QUIT])
+    replies = iter([str(input_image), "2", KEEP, QUIT, DELETE_ALL])
 
     def fake_input(prompt):
         if not seen_before_first_prompt:
@@ -422,12 +423,13 @@ def test_intro_printed_before_first_question(tmp_path, input_image, monkeypatch,
     for question in ["1. Image path", "2. Number of colors k", "3. Options"]:
         assert question in intro
     assert "Output file" not in intro
-    assert "deleted when the program ends" in intro
+    assert "you choose which results to keep" in intro
+    assert "the rest are deleted" in intro
     assert "numbered menu" in intro
 
 
 def test_intro_lists_only_questions_that_will_be_asked(tmp_path, input_image, answers, capsys):
-    answers("3", KEEP, QUIT)
+    answers("3", KEEP, QUIT, DELETE_ALL)
     assert main([str(input_image), "-o", str(tmp_path / "q.png")]) == 0
     intro = capsys.readouterr().out.split("Loaded")[0]
     assert "1. Number of colors k" in intro and "2. Options" in intro
@@ -435,7 +437,7 @@ def test_intro_lists_only_questions_that_will_be_asked(tmp_path, input_image, an
 
 
 def test_no_intro_when_quiet(tmp_path, input_image, answers, capsys):
-    answers("3", KEEP, QUIT)
+    answers("3", KEEP, QUIT, DELETE_ALL)
     main([str(input_image), "-o", str(tmp_path / "q.png"), "-q"])
     assert "What it does" not in capsys.readouterr().out
 
@@ -477,7 +479,7 @@ def test_unrelated_files_in_output_folder_survive(tmp_path, input_image, answers
     (tmp_path / "output").mkdir()
     mine = tmp_path / "output" / "mine.txt"
     mine.write_text("keep me")
-    answers(str(input_image), "2", KEEP, QUIT)
+    answers(str(input_image), "2", KEEP, QUIT, DELETE_ALL)
     assert main([]) == 0
     assert mine.read_text() == "keep me"
     assert png_files(tmp_path / "output") == []
@@ -485,7 +487,7 @@ def test_unrelated_files_in_output_folder_survive(tmp_path, input_image, answers
 
 def test_cleanup_on_ctrl_c_at_menu(tmp_path, input_image, answers, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
-    answers(str(input_image), "2", KEEP, KeyboardInterrupt())
+    answers(str(input_image), "2", KEEP, KeyboardInterrupt(), DELETE_ALL)
     assert main([]) == 0
     assert not (tmp_path / "output").exists()
     assert "Deleted 2 result file(s)" in capsys.readouterr().out
@@ -515,7 +517,97 @@ def test_cleanup_when_second_round_fails(tmp_path, input_image, answers, monkeyp
 
 def test_quiet_cleanup_prints_nothing(tmp_path, input_image, answers, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
-    answers(str(input_image), "2", KEEP, QUIT)
+    answers(str(input_image), "2", KEEP, QUIT, DELETE_ALL)
     main(["-q"])
     assert "Deleted" not in capsys.readouterr().out
     assert not (tmp_path / "output").exists()
+
+
+# --- Choosing which results to keep at quit ------------------------------------
+
+
+@pytest.fixture
+def two_rounds(tmp_path, input_image, answers, monkeypatch):
+    """Run a wizard session with k=3 then k=2 (default options), then answer the keep list."""
+    monkeypatch.chdir(tmp_path)
+
+    def go(*keep_answers):
+        prompts = answers(str(input_image), "3", KEEP, "1", "2", QUIT, *keep_answers)
+        code = main([])
+        return code, prompts
+
+    return go
+
+
+def test_keep_list_shows_files_in_order(two_rounds, capsys):
+    code, prompts = two_rounds(DELETE_ALL)
+    assert code == 0
+    out = capsys.readouterr().out
+    listing = out.split("Result files from this session:")[1]
+    assert [line.strip() for line in listing.splitlines()[1:5]] == [
+        "1. output/in_k3.png", "2. output/in_k3_compare.png",
+        "3. output/in_k2.png", "4. output/in_k2_compare.png",
+    ]
+    assert prompts[-1].startswith("Numbers of files to KEEP")
+    assert out.rstrip().endswith("Bye!")
+
+
+def test_keep_chosen_files_moved_to_saved(two_rounds, tmp_path, capsys):
+    code, _ = two_rounds("3 1")
+    assert code == 0
+    assert png_files(tmp_path / "saved") == ["in_k2.png", "in_k3.png"]
+    assert not (tmp_path / "output").exists()
+    out = capsys.readouterr().out
+    assert "Kept 2 file(s) in saved/:" in out
+    assert "Deleted 2 result file(s)" in out
+
+
+def test_keep_all(two_rounds, tmp_path, capsys):
+    two_rounds("a")
+    assert len(png_files(tmp_path / "saved")) == 4
+    assert not (tmp_path / "output").exists()
+    assert "Deleted" not in capsys.readouterr().out
+
+
+def test_keep_none_with_enter(two_rounds, tmp_path):
+    two_rounds(DELETE_ALL)
+    assert not (tmp_path / "saved").exists()
+    assert not (tmp_path / "output").exists()
+
+
+def test_keep_list_rejects_invalid_numbers(two_rounds, tmp_path, capsys):
+    two_rounds("9", "x 1", "2")
+    assert png_files(tmp_path / "saved") == ["in_k3_compare.png"]
+    assert capsys.readouterr().err.count("is not an option (1-4)") == 2
+
+
+def test_ctrl_c_at_keep_list_deletes_all(two_rounds, tmp_path):
+    code, _ = two_rounds(KeyboardInterrupt())
+    assert code == 0
+    assert not (tmp_path / "saved").exists()
+    assert not (tmp_path / "output").exists()
+
+
+def test_ctrl_c_at_menu_still_offers_keep_list(tmp_path, input_image, answers, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    answers(str(input_image), "2", KEEP, KeyboardInterrupt(), "1")
+    assert main([]) == 0
+    assert png_files(tmp_path / "saved") == ["in_k2.png"]
+
+
+def test_saved_name_clash_gets_suffix(two_rounds, tmp_path):
+    (tmp_path / "saved").mkdir()
+    existing = tmp_path / "saved" / "in_k3.png"
+    existing.write_bytes(b"old")
+    two_rounds("1")
+    assert existing.read_bytes() == b"old"
+    assert (tmp_path / "saved" / "in_k3_1.png").exists()
+
+
+def test_o_files_not_listed(tmp_path, input_image, answers, capsys):
+    out = tmp_path / "art.png"
+    answers(KEEP, "1", "2", QUIT, "a")
+    assert main([str(input_image), "-k", "4", "-o", str(out), "-i", "--no-compare"]) == 0
+    listing = capsys.readouterr().out.split("Result files from this session:")[1]
+    assert "art_k2.png" in listing and "art.png" not in listing
+    assert out.exists()

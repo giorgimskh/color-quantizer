@@ -5,13 +5,15 @@ interactive run the user also picks options from a numbered list after
 entering k, and after each result a numbered menu offers another k, another
 image, changing options, or quitting.
 
-Interactive results are temporary: they are saved in ``output/`` and every
-file the program created is deleted when it ends, so each start is fresh.
-Files at a path given with ``-o`` on the command line are kept.
+Interactive results are temporary: they are saved in ``output/``. On quit the
+user picks which to keep (moved to ``saved/``); every other file the program
+created is deleted, so each start is fresh. Files at a path given with ``-o``
+on the command line are always kept.
 """
 
 import argparse
 import os
+import shutil
 import sys
 import time
 from collections.abc import Sequence
@@ -28,6 +30,7 @@ from color_quantizer.interactive import (
     ask_image,
     ask_int,
     ask_k,
+    ask_keep,
     ask_menu,
     ask_multi,
     parse_k,
@@ -118,6 +121,7 @@ def compare_path(output: Path) -> Path:
 
 
 OUTPUT_DIR = Path("output")
+SAVED_DIR = Path("saved")
 
 
 def default_output(input_path: Path, k: int) -> Path:
@@ -130,13 +134,56 @@ def related_files(output: Path) -> set[Path]:
     return {output, compare_path(output), palette_path(output)}
 
 
-def cleanup(created: set[Path], keep: set[Path], quiet: bool) -> None:
+def unique_path(path: Path) -> Path:
+    """``path`` itself if free, else the first free ``<stem>_1<suffix>``, ``_2``, ..."""
+    candidate, n = path, 1
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem}_{n}{path.suffix}")
+        n += 1
+    return candidate
+
+
+def move_to_saved(paths: list[Path]) -> list[Path]:
+    """Move files into saved/ without overwriting anything; return the new paths."""
+    SAVED_DIR.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for path in paths:
+        target = unique_path(SAVED_DIR / path.name)
+        shutil.move(path, target)
+        moved.append(target)
+    return moved
+
+
+def review_results(created: list[Path], keep: set[Path]) -> None:
+    """At quit: list this session's result files and move the chosen ones to saved/.
+
+    Files not chosen are left for :func:`cleanup` to delete. Ctrl+C here keeps nothing.
+    """
+    files = [path for path in created if path not in keep and path.exists()]
+    if not files:
+        return
+    try:
+        numbers = ask_keep(files)
+    except Cancelled:
+        print()
+        numbers = []
+    if numbers:
+        moved = move_to_saved([files[n - 1] for n in numbers])
+        print(f"Kept {len(moved)} file(s) in {SAVED_DIR}/:")
+        for path in moved:
+            print(f"  {path}")
+
+
+def cleanup(created: list[Path], keep: set[Path], quiet: bool) -> None:
     """Delete the files this run created (except ``keep``) and an empty output/ folder.
 
-    Files the program did not create are never touched.
+    Files the program did not create are never touched; files already moved to
+    saved/ are skipped because they no longer exist at their old path.
     """
     removed = 0
-    for path in sorted(created - keep):
+    for path in created:
+        if path in keep:
+            continue
         try:
             path.unlink()
             removed += 1
@@ -250,7 +297,8 @@ def build_intro(args: argparse.Namespace) -> str:
         "    <name>_k<k>.png           the image with k colors",
         "    <name>_k<k>_compare.png   original and result side by side (option 4)",
         "    <name>_k<k>_palette.png   the k colors as swatches (option 3)",
-        "  They are deleted when the program ends, so every start is fresh.",
+        "  When you quit, you choose which results to keep: kept files are moved",
+        f"  to {SAVED_DIR}/, the rest are deleted, so every start is fresh.",
         "  To keep a result: quantize photo.jpg -k 8 -o keep.png",
         "",
         "After each result a numbered menu lets you try another k, choose another",
@@ -355,16 +403,21 @@ def run(args: argparse.Namespace) -> int:
     if interactive and not args.quiet:
         print(build_intro(args), flush=True)
 
-    created: set[Path] = set()
+    created: list[Path] = []
     keep = related_files(args.output) if args.output is not None else set()
     try:
-        return _run_session(args, interactive, created)
+        code = _run_session(args, interactive, created, keep)
     finally:
         cleanup(created, keep, args.quiet)
+    if interactive:
+        print("Bye!")
+    return code
 
 
-def _run_session(args: argparse.Namespace, interactive: bool, created: set[Path]) -> int:
-    """The main loop; every file written is added to ``created``."""
+def _run_session(
+    args: argparse.Namespace, interactive: bool, created: list[Path], keep: set[Path]
+) -> int:
+    """The main loop; every file written is appended to ``created`` (in order)."""
     if args.input is None:
         input_path, image = ask_image()
     else:
@@ -384,7 +437,9 @@ def _run_session(args: argparse.Namespace, interactive: bool, created: set[Path]
     base_output = output
 
     while True:
-        created.update(session.run(k, output, options))
+        for path in session.run(k, output, options):
+            if path not in created:
+                created.append(path)
         if not interactive:
             return 0
         try:
@@ -404,7 +459,7 @@ def _run_session(args: argparse.Namespace, interactive: bool, created: set[Path]
         except Cancelled:
             choice = 4
         if choice == 4:
-            print("Bye!")
+            review_results(created, keep)
             return 0
         k = session.clamp_k(k)
         if output_is_default:

@@ -140,3 +140,21 @@ def ask_multi(title: str, items: list[str]) -> list[int]:
             return parse_choices(answer, len(items))
         except ValueError as exc:
             _complain(f"{exc}. Try again.")
+
+
+def ask_keep(files: list[Path]) -> list[int]:
+    """List files with numbers and ask which to keep.
+
+    Returns:
+        The 1-based numbers of the files to keep: all of them for ``a``,
+        none for an empty answer.
+    """
+    _print_items("\nResult files from this session:", [str(f) for f in files])
+    while True:
+        answer = ask("Numbers of files to KEEP (e.g. 1 3), a = keep all, Enter = delete all: ")
+        if answer.lower() in ("a", "all"):
+            return list(range(1, len(files) + 1))
+        try:
+            return parse_choices(answer, len(files))
+        except ValueError as exc:
+            _complain(f"{exc}. Try again.")

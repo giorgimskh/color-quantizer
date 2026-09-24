@@ -87,8 +87,20 @@ Choose 1-4: 1
 How many colors (k)? [8] 16
 ...
 Choose 1-4: 4
+
+Result files from this session:
+  1. output/autumn_k8.png
+  2. output/autumn_k8_compare.png
+  3. output/autumn_k8_palette.png
+  4. output/autumn_k16.png
+  5. output/autumn_k16_compare.png
+  6. output/autumn_k16_palette.png
+Numbers of files to KEEP (e.g. 1 3), a = keep all, Enter = delete all: 1 5
+Kept 2 file(s) in saved/:
+  saved/autumn_k8.png
+  saved/autumn_k16_compare.png
+Deleted 4 result file(s) from output/ - next start is fresh.
 Bye!
-Deleted 6 result file(s) from output/ - next start is fresh.
 ```
 
 **Options list** (shown right after you enter k): pick any number of options at once, e.g. `1 3`.
@@ -102,7 +114,7 @@ Press Enter to keep everything as it is.
 | `1` | run again on the same image with a different k (Enter keeps the current k) |
 | `2` | choose another image |
 | `3` | change options, then return to the menu |
-| `4` | quit |
+| `4` | quit, choosing which result files to keep |
 
 Tips: drag an image into the terminal to paste its path, press Enter to accept a `[default]`, and use Ctrl+C to quit at any time.
 
@@ -137,11 +149,18 @@ quantize photo.jpg -k 4 -o poster.png --palette --show --seed 42
 | `<name>_k<k>_palette.png` | the k colors, most used first (option 3 / `--palette`) |
 
 **Interactive results are temporary.** While the program runs they are saved in `output/`
-and opened in your image viewer. When the program ends (Quit, Ctrl+C or an error),
-every file it created is deleted, so each start is fresh. Other files in `output/` are
-never touched.
+and opened in your image viewer. When you quit (menu 4 or Ctrl+C at a question), the
+program lists every result file with a number and asks which to keep:
 
-To **keep** a result, give an output path on the command line. Files at that path are never deleted:
+- type the numbers of the files to keep, e.g. `1 5`. They are moved to `saved/`
+  (an existing name gets `_1`, `_2`, ... so nothing is overwritten)
+- `a` keeps all, and Enter deletes all
+
+Everything not kept is deleted and `output/` is removed, so each start is fresh. If the
+program stops because of an error or Ctrl+C during processing, all results are deleted
+without asking. Other files in `output/` are never touched.
+
+You can also keep a result by giving an output path on the command line. Files at that path are never deleted:
 
 ```bash
 quantize photo.jpg -k 8 -o keep.png
