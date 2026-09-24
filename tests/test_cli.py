@@ -65,7 +65,6 @@ def test_k_larger_than_pixel_count_is_clamped(tmp_path, capsys):
     [
         ["in.png", "-k", "0", "-o", "o.png"],
         ["in.png", "-k", "abc", "-o", "o.png"],
-        ["in.png", "-o", "o.png"],
         ["in.png", "-k", "4"],
         ["in.png", "-k", "4", "-o", "o.png", "--max-iter", "0"],
     ],
@@ -74,3 +73,31 @@ def test_bad_arguments_exit_2(argv):
     with pytest.raises(SystemExit) as exc:
         main(argv)
     assert exc.value.code == 2
+
+
+def test_k_prompted_when_omitted(tmp_path, input_image, monkeypatch, capsys):
+    answers = iter(["abc", "0", " 3 "])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    out = tmp_path / "q.png"
+    assert main([str(input_image), "-o", str(out), "--seed", "0"]) == 0
+    assert len(np.unique(load_image(out).reshape(-1, 3), axis=0)) <= 3
+    captured = capsys.readouterr()
+    assert captured.err.count("Please enter a whole number") == 2
+    assert "Saved 3-color image" in captured.out
+
+
+def test_prompt_eof_returns_error(tmp_path, input_image, monkeypatch, capsys):
+    def eof(prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", eof)
+    assert main([str(input_image), "-o", str(tmp_path / "q.png")]) == 1
+    assert "no number of colors" in capsys.readouterr().err
+
+
+def test_missing_input_fails_before_prompt(tmp_path, monkeypatch):
+    def no_prompt(prompt):
+        raise AssertionError("should not prompt")
+
+    monkeypatch.setattr("builtins.input", no_prompt)
+    assert main([str(tmp_path / "nope.png"), "-o", str(tmp_path / "o.png")]) == 1

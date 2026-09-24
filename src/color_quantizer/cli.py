@@ -29,7 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("input", type=Path, help="input image path")
     parser.add_argument(
-        "-k", "--colors", type=_positive_int, required=True, help="number of colors"
+        "-k",
+        "--colors",
+        type=_positive_int,
+        default=None,
+        help="number of colors (asked interactively if omitted)",
     )
     parser.add_argument(
         "-o", "--output", type=Path, required=True, help="output image path"
@@ -47,6 +51,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def prompt_for_k() -> int:
+    """Ask on stdin for the number of colors until a valid integer >= 1 is given.
+
+    Raises:
+        EOFError: If stdin is closed before a valid answer.
+    """
+    while True:
+        answer = input("How many colors (k)? ").strip()
+        try:
+            return _positive_int(answer)
+        except argparse.ArgumentTypeError as exc:
+            print(f"Please enter a whole number >= 1 ({exc}).", file=sys.stderr)
+
+
 def palette_path(output: Path) -> Path:
     """Path of the palette image saved next to ``output``."""
     return output.with_name(f"{output.stem}_palette.png")
@@ -59,6 +77,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         image = load_image(args.input)
         n_pixels = image.shape[0] * image.shape[1]
         k = args.colors
+        if k is None:
+            try:
+                k = prompt_for_k()
+            except (EOFError, KeyboardInterrupt):
+                print("\nerror: no number of colors given", file=sys.stderr)
+                return 1
         if k > n_pixels:
             print(
                 f"warning: image has only {n_pixels} pixels; using k={n_pixels}",

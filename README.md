@@ -11,12 +11,12 @@ pytest
 
 ## Usage
 ```bash
-quantize input.jpg -k 8 -o output.png [--seed 0] [--max-iter 100] [--palette]
+quantize input.jpg [-k 8] -o output.png [--seed 0] [--max-iter 100] [--palette]
 ```
 
 | Option | Meaning |
 | --- | --- |
-| `-k`, `--colors` | number of colors (required, ≥ 1) |
+| `-k`, `--colors` | number of colors (≥ 1); if omitted, you are asked for it after start |
 | `-o`, `--output` | output image path; format from the extension (required) |
 | `--seed` | random seed for reproducible results |
 | `--max-iter` | maximum k-means iterations (default 100) |

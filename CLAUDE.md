@@ -11,7 +11,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest                                    # all tests
 pytest tests/test_image_io.py::test_name  # single test
-quantize <input> -k <int> -o <output> [--seed N] [--max-iter N] [--palette]
+quantize <input> [-k <int>] -o <output> [--seed N] [--max-iter N] [--palette]
 ```
 
 ## Architecture (`src/color_quantizer/`)
