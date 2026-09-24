@@ -6,6 +6,7 @@ build/
 dist/
 .pytest_cache/
 output/
+*_k*.png
 
 # Local-only files
 CLAUDE.md
