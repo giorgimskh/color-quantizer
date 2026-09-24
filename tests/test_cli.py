@@ -52,12 +52,28 @@ def answers(monkeypatch):
                 raise AssertionError(f"no scripted answer for prompt {prompt!r}") from None
             if isinstance(reply, BaseException):
                 raise reply
+            if callable(reply):
+                reply = reply()
             return reply
 
         monkeypatch.setattr("builtins.input", fake_input)
         return prompts
 
     return feed
+
+
+def png_files(folder: Path) -> list[str]:
+    return sorted(p.name for p in folder.glob("*.png")) if folder.exists() else []
+
+
+def snapshot(folder: Path, store: dict, reply: str):
+    """An answer that records the PNGs in ``folder`` at prompt time, then replies."""
+
+    def take():
+        store["files"] = png_files(folder)
+        return reply
+
+    return take
 
 
 def n_colors(path: Path) -> int:
@@ -167,8 +183,9 @@ def test_bad_arguments_exit_2(argv):
 
 
 # --- Interactive use -----------------------------------------------------------
-# Answer order in an interactive run: [image path], [k], options list,
-# [output file], then the "What next?" menu after each result.
+# Answer order in an interactive run: [image path], [k], options list, then the
+# "What next?" menu after each result. Results are saved in output/ and deleted
+# at exit, except files at a path given with -o.
 
 KEEP = ""  # Enter: keep options / accept default
 QUIT = "4"  # "What next?" menu: Quit
@@ -187,25 +204,26 @@ def test_k_prompted_when_omitted(tmp_path, input_image, answers, capsys):
 
 def test_full_wizard(tmp_path, input_image, answers, capsys, monkeypatch, viewer):
     monkeypatch.chdir(tmp_path)
+    during = {}
     prompts = answers(
         str(tmp_path / "missing.png"),  # bad path -> asked again
         f"'{input_image}'",  # quoted, as when drag-and-dropped
         "5",  # k
-        "3 5",  # options: palette on, viewer on
-        KEEP,  # default output name
+        "3",  # options: palette on (viewer is on by default)
         "1", "2",  # What next -> another k: 2
-        QUIT,
+        snapshot(tmp_path / "output", during, QUIT),
     )
     assert main([]) == 0
     assert prompts[:2] == ["Image path: ", "Image path: "]
-    assert "Output file [in_k5.png]: " in prompts
-    for name in ["in_k5.png", "in_k5_compare.png", "in_k5_palette.png",
-                 "in_k2.png", "in_k2_compare.png", "in_k2_palette.png"]:
-        assert (tmp_path / name).exists(), name
-    assert n_colors(tmp_path / "in_k2.png") <= 2
+    assert not any(p.startswith("Output file") for p in prompts)
+    assert during["files"] == sorted(
+        f"in_k{k}{suffix}.png" for k in (5, 2) for suffix in ("", "_compare", "_palette")
+    )
+    assert not (tmp_path / "output").exists()  # everything deleted at exit
     assert len(viewer) == 2  # opened after each round
     captured = capsys.readouterr()
     assert "Try again" in captured.err
+    assert "Deleted 6 result file(s) from output/" in captured.out
     assert "Bye!" in captured.out
 
 
@@ -272,31 +290,27 @@ def test_what_next_menu_is_numbered(tmp_path, input_image, answers, capsys):
 
 def test_what_next_change_options_then_run(tmp_path, input_image, answers):
     out = tmp_path / "q.png"
+    during = {}
     answers(
         "4", KEEP,  # first round: k=4, default options
         "3", "3",  # What next -> change options -> palette on
         "1", KEEP,  # What next -> another k, Enter keeps k=4
-        QUIT,
+        snapshot(tmp_path, during, QUIT),
     )
     assert main([str(input_image), "-o", str(out)]) == 0
-    assert (tmp_path / "q_k4.png").exists()
-    assert (tmp_path / "q_k4_palette.png").exists()
-    assert not (tmp_path / "q_palette.png").exists()
-
-
-def test_wizard_rejects_unknown_output_format(tmp_path, input_image, answers, capsys, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    answers(str(input_image), "2", KEEP, "result.xyz", "result.png", QUIT)
-    assert main([]) == 0
-    assert (tmp_path / "result.png").exists()
-    assert "Unknown image format" in capsys.readouterr().err
+    assert {"q_k4.png", "q_k4_palette.png"} <= set(during["files"])
+    assert "q_palette.png" not in during["files"]
+    assert out.exists() and (tmp_path / "q_compare.png").exists()  # -o files kept
+    assert not (tmp_path / "q_k4.png").exists()  # derived files deleted
 
 
 def test_interactive_flag_names_extra_outputs_after_custom_output(tmp_path, input_image, answers):
     out = tmp_path / "art.png"
-    prompts = answers(KEEP, "1", "2", QUIT)
+    during = {}
+    prompts = answers(KEEP, "1", "2", snapshot(tmp_path, during, QUIT))
     assert main([str(input_image), "-k", "4", "-o", str(out), "-i", "--no-compare"]) == 0
-    assert out.exists() and (tmp_path / "art_k2.png").exists()
+    assert {"art.png", "art_k2.png"} <= set(during["files"])
+    assert out.exists() and not (tmp_path / "art_k2.png").exists()
     assert prompts[0].startswith("Enter numbers separated by spaces")  # options still offered
 
 
@@ -336,35 +350,49 @@ def second_image(tmp_path):
 
 def test_change_image_after_a_result(tmp_path, input_image, second_image, answers, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    during = {}
     prompts = answers(
-        str(input_image), "3", KEEP, KEEP,  # first round: in.png, k=3
+        str(input_image), "3", KEEP,  # first round: in.png, k=3
         "2",  # What next -> choose another image
         "nope.png",  # bad path -> asked again
         str(second_image),
         KEEP,  # keep k=3
         "1", "2",  # What next -> another k: 2
-        QUIT,
+        snapshot(tmp_path / "output", during, QUIT),
     )
     assert main([]) == 0
     assert "How many colors (k)? [3] " in prompts
-    for name in ["in_k3.png", "other_k3.png", "other_k2.png"]:
-        assert (tmp_path / name).exists(), name
-    assert not (tmp_path / "in_k2.png").exists()
-    np.testing.assert_array_equal(load_image(tmp_path / "other_k2.png")[0, [0, 11]],
-                                  [[0, 0, 0], [250, 10, 10]])
+    assert {"in_k3.png", "other_k3.png", "other_k2.png"} <= set(during["files"])
+    assert "in_k2.png" not in during["files"]
+    assert not (tmp_path / "output").exists()
     out = capsys.readouterr().out
     assert "Loaded other.png: 12x10 pixels, 2 distinct colors" in out
     assert "Bye!" in out
+
+
+def test_change_image_result_colors(tmp_path, second_image, answers, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    grabbed = {}
+
+    def grab():
+        grabbed["img"] = load_image(tmp_path / "output" / "other_k2.png")
+        return QUIT
+
+    answers(str(second_image), "2", KEEP, grab)
+    assert main([]) == 0
+    np.testing.assert_array_equal(grabbed["img"][0, [0, 11]], [[0, 0, 0], [250, 10, 10]])
 
 
 def test_change_image_after_custom_output_uses_default_names(
     tmp_path, input_image, second_image, answers, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    answers(KEEP, "2", str(second_image), "4", QUIT)
+    during = {}
+    answers(KEEP, "2", str(second_image), "4", snapshot(tmp_path / "output", during, QUIT))
     assert main([str(input_image), "-k", "2", "-o", "art.png", "-i", "--no-compare"]) == 0
+    assert "other_k4.png" in during["files"]
     assert (tmp_path / "art.png").exists()
-    assert (tmp_path / "other_k4.png").exists()
+    assert not (tmp_path / "output").exists()
 
 
 def test_ctrl_c_while_changing_image_quits_cleanly(tmp_path, input_image, answers, capsys):
@@ -379,7 +407,7 @@ def test_ctrl_c_while_changing_image_quits_cleanly(tmp_path, input_image, answer
 def test_intro_printed_before_first_question(tmp_path, input_image, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     seen_before_first_prompt = []
-    replies = iter([str(input_image), "2", KEEP, KEEP, QUIT])
+    replies = iter([str(input_image), "2", KEEP, QUIT])
 
     def fake_input(prompt):
         if not seen_before_first_prompt:
@@ -391,8 +419,10 @@ def test_intro_printed_before_first_question(tmp_path, input_image, monkeypatch,
     intro = seen_before_first_prompt[0]
     assert intro.startswith("+---")
     assert "What it does:" in intro
-    for question in ["1. Image path", "2. Number of colors k", "3. Options", "4. Output file"]:
+    for question in ["1. Image path", "2. Number of colors k", "3. Options"]:
         assert question in intro
+    assert "Output file" not in intro
+    assert "deleted when the program ends" in intro
     assert "numbered menu" in intro
 
 
@@ -437,3 +467,55 @@ def test_parse_choices():
     for bad in ["0", "6", "x", "1 -2", "1.5"]:
         with pytest.raises(ValueError):
             parse_choices(bad, 5)
+
+
+# --- Temporary results ---------------------------------------------------------
+
+
+def test_unrelated_files_in_output_folder_survive(tmp_path, input_image, answers, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "output").mkdir()
+    mine = tmp_path / "output" / "mine.txt"
+    mine.write_text("keep me")
+    answers(str(input_image), "2", KEEP, QUIT)
+    assert main([]) == 0
+    assert mine.read_text() == "keep me"
+    assert png_files(tmp_path / "output") == []
+
+
+def test_cleanup_on_ctrl_c_at_menu(tmp_path, input_image, answers, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    answers(str(input_image), "2", KEEP, KeyboardInterrupt())
+    assert main([]) == 0
+    assert not (tmp_path / "output").exists()
+    assert "Deleted 2 result file(s)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("error, code", [(ValueError("boom"), 1), (KeyboardInterrupt(), 130)])
+def test_cleanup_when_second_round_fails(tmp_path, input_image, answers, monkeypatch, capsys, error, code):
+    monkeypatch.chdir(tmp_path)
+    import color_quantizer.cli as cli
+
+    real = cli.quantize_with_stats
+    calls = []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise error
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "quantize_with_stats", flaky)
+    answers(str(input_image), "3", KEEP, "1", "2")
+    assert main([]) == code
+    assert not (tmp_path / "output").exists()
+    err = capsys.readouterr().err
+    assert ("error: boom" in err) if code == 1 else ("Interrupted." in err)
+
+
+def test_quiet_cleanup_prints_nothing(tmp_path, input_image, answers, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    answers(str(input_image), "2", KEEP, QUIT)
+    main(["-q"])
+    assert "Deleted" not in capsys.readouterr().out
+    assert not (tmp_path / "output").exists()

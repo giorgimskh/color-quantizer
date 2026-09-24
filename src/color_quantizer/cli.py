@@ -4,6 +4,10 @@ Anything not given as an argument is asked for interactively. In an
 interactive run the user also picks options from a numbered list after
 entering k, and after each result a numbered menu offers another k, another
 image, changing options, or quitting.
+
+Interactive results are temporary: they are saved in ``output/`` and every
+file the program created is deleted when it ends, so each start is fresh.
+Files at a path given with ``-o`` on the command line are kept.
 """
 
 import argparse
@@ -26,7 +30,6 @@ from color_quantizer.interactive import (
     ask_k,
     ask_menu,
     ask_multi,
-    ask_output,
     parse_k,
 )
 from color_quantizer.quantizer import (
@@ -114,9 +117,40 @@ def compare_path(output: Path) -> Path:
     return output.with_name(f"{output.stem}_compare.png")
 
 
+OUTPUT_DIR = Path("output")
+
+
 def default_output(input_path: Path, k: int) -> Path:
-    """Default output name: ``<input stem>_k<k>.png`` in the current directory."""
-    return Path(f"{input_path.stem}_k{k}.png")
+    """Default output path: ``output/<input stem>_k<k>.png``."""
+    return OUTPUT_DIR / f"{input_path.stem}_k{k}.png"
+
+
+def related_files(output: Path) -> set[Path]:
+    """``output`` plus the comparison and palette files saved next to it."""
+    return {output, compare_path(output), palette_path(output)}
+
+
+def cleanup(created: set[Path], keep: set[Path], quiet: bool) -> None:
+    """Delete the files this run created (except ``keep``) and an empty output/ folder.
+
+    Files the program did not create are never touched.
+    """
+    removed = 0
+    for path in sorted(created - keep):
+        try:
+            path.unlink()
+            removed += 1
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            print(f"warning: could not delete {path}: {exc}", file=sys.stderr)
+    if any(path.parent == OUTPUT_DIR for path in created):
+        try:
+            OUTPUT_DIR.rmdir()  # only succeeds if the folder is empty
+        except OSError:
+            pass
+    if removed and not quiet:
+        print(f"Deleted {removed} result file(s) from {OUTPUT_DIR}/ - next start is fresh.")
 
 
 @dataclass
@@ -192,8 +226,6 @@ def build_intro(args: argparse.Namespace) -> str:
     questions.append(
         "Options - pick any by number (seed, iterations, palette, comparison, viewer)"
     )
-    if args.output is None:
-        questions.append("Output file - press Enter to keep the suggested name")
 
     title = f"color-quantizer {__version__} - reduce an image to k colors"
     lines = [
@@ -211,11 +243,15 @@ def build_intro(args: argparse.Namespace) -> str:
         lines.append("You will be asked:")
         lines += [f"  {i}. {q}" for i, q in enumerate(questions, 1)]
         lines.append("")
-    lines.append("Files saved:")
-    lines.append("  <output>.png           the image with k colors")
-    lines.append("  <output>_compare.png   original and result side by side (option 4)")
-    lines.append("  <output>_palette.png   the k colors as swatches (option 3)")
     lines += [
+        "Results (temporary):",
+        f"  While the program runs, results are saved in {OUTPUT_DIR}/ and shown in",
+        "  your image viewer (option 5):",
+        "    <name>_k<k>.png           the image with k colors",
+        "    <name>_k<k>_compare.png   original and result side by side (option 4)",
+        "    <name>_k<k>_palette.png   the k colors as swatches (option 3)",
+        "  They are deleted when the program ends, so every start is fresh.",
+        "  To keep a result: quantize photo.jpg -k 8 -o keep.png",
         "",
         "After each result a numbered menu lets you try another k, choose another",
         "image, change options, or quit. Ctrl+C quits at any time.",
@@ -272,8 +308,12 @@ class Session:
             return self.n_pixels
         return k
 
-    def run(self, k: int, output: Path, options: Options) -> None:
-        """Quantize to k colors, save the results and print a summary."""
+    def run(self, k: int, output: Path, options: Options) -> list[Path]:
+        """Quantize to k colors, save the results and print a summary.
+
+        Returns:
+            The paths of all files written.
+        """
         start = time.perf_counter()
         result = quantize_with_stats(
             self.image, k, seed=options.seed, max_iter=options.max_iter, progress=self.say
@@ -281,15 +321,18 @@ class Session:
         elapsed = time.perf_counter() - start
 
         save_image(result.image, output)
+        saved = [output]
         print(f"Saved {k}-color image to {output}")
         comparison = side_by_side(self.image, result.image)
         if options.compare:
             path = compare_path(output)
             save_image(comparison, path)
+            saved.append(path)
             print(f"Saved comparison (original | reconstructed) to {path}")
         if options.palette:
             path = palette_path(output)
             save_image(palette_image(result.palette), path)
+            saved.append(path)
             print(f"Saved palette to {path}")
 
         self.say(f"Done in {elapsed:.1f}s")
@@ -301,16 +344,27 @@ class Session:
 
         if options.show:
             Image.fromarray(comparison).show(title="original | reconstructed")
+        return saved
 
 
 def run(args: argparse.Namespace) -> int:
-    """Gather missing values interactively, then quantize (possibly repeatedly)."""
+    """Gather missing values interactively, quantize, and clean up temporary results."""
     interactive = (
         args.input is None or args.output is None or args.colors is None or args.interactive
     )
     if interactive and not args.quiet:
         print(build_intro(args), flush=True)
 
+    created: set[Path] = set()
+    keep = related_files(args.output) if args.output is not None else set()
+    try:
+        return _run_session(args, interactive, created)
+    finally:
+        cleanup(created, keep, args.quiet)
+
+
+def _run_session(args: argparse.Namespace, interactive: bool, created: set[Path]) -> int:
+    """The main loop; every file written is added to ``created``."""
     if args.input is None:
         input_path, image = ask_image()
     else:
@@ -322,13 +376,15 @@ def run(args: argparse.Namespace) -> int:
     k = session.clamp_k(k)
     options = Options.from_args(args)
     if interactive:
+        # Results are deleted at exit, so show them by default.
+        options.show = True
         options = choose_options(options)
-    output = args.output if args.output is not None else ask_output(default_output(input_path, k))
-    output_is_default = output == default_output(input_path, k)
+    output = args.output if args.output is not None else default_output(input_path, k)
+    output_is_default = args.output is None
     base_output = output
 
     while True:
-        session.run(k, output, options)
+        created.update(session.run(k, output, options))
         if not interactive:
             return 0
         try:
@@ -344,7 +400,6 @@ def run(args: argparse.Namespace) -> int:
                 session = Session(args, image, input_path)
                 session.describe()
                 k = ask_k(f"How many colors (k)? [{k}] ", default=k)
-                # Name outputs after the new image so earlier results are kept.
                 output_is_default = True
         except Cancelled:
             choice = 4
@@ -369,6 +424,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

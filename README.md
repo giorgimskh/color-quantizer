@@ -55,8 +55,8 @@ Options (yes/no options switch when picked; the others ask for a value):
   2. Max k-means iterations  (now: 100)
   3. Save palette image      (now: no)
   4. Save comparison image   (now: yes)
-  5. Open result in viewer   (now: no)
-Enter numbers separated by spaces (e.g. 1 3), or press Enter to keep: 1 3 5
+  5. Open result in viewer   (now: yes)
+Enter numbers separated by spaces (e.g. 1 3), or press Enter to keep: 1 3
 Random seed (whole number >= 0, Enter = random): 42
 Options now:
   - Random seed             (now: 42)
@@ -64,13 +64,12 @@ Options now:
   - Save palette image      (now: yes)
   - Save comparison image   (now: yes)
   - Open result in viewer   (now: yes)
-Output file [autumn_k8.png]:
 Training k-means (k=8) on 50,000 of 2,073,600 pixels...
   converged after 22 iterations
 Mapping all 2,073,600 pixels to their nearest color...
-Saved 8-color image to autumn_k8.png
-Saved comparison (original | reconstructed) to autumn_k8_compare.png
-Saved palette to autumn_k8_palette.png
+Saved 8-color image to output/autumn_k8.png
+Saved comparison (original | reconstructed) to output/autumn_k8_compare.png
+Saved palette to output/autumn_k8_palette.png
 Done in 0.3s
   Colors:      197,414 -> 8
   Color error: 13.5 (RMS, 0-255 scale)
@@ -87,9 +86,12 @@ What next?
 Choose 1-4: 1
 How many colors (k)? [8] 16
 ...
+Choose 1-4: 4
+Bye!
+Deleted 6 result file(s) from output/ - next start is fresh.
 ```
 
-**Options list** (shown right after you enter k): pick any number of options at once, e.g. `1 3 5`.
+**Options list** (shown right after you enter k): pick any number of options at once, e.g. `1 3`.
 The yes/no options (3-5) switch on or off when picked. Seed and iterations ask for a value.
 Press Enter to keep everything as it is.
 
@@ -117,7 +119,7 @@ quantize photo.jpg -k 4 -o poster.png --palette --show --seed 42
 | --- | --- |
 | `input` | image to quantize (asked if omitted) |
 | `-k`, `--colors` | number of colors, ≥ 1 (asked if omitted) |
-| `-o`, `--output` | output image path; format from the extension (asked if omitted) |
+| `-o`, `--output` | output image path to keep; format from the extension (without it, results are temporary) |
 | `--seed` | random seed (≥ 0); the same seed gives the same result |
 | `--max-iter` | maximum k-means iterations (default 100) |
 | `--palette` | also save the colors as a swatch strip |
@@ -130,9 +132,20 @@ quantize photo.jpg -k 4 -o poster.png --palette --show --seed 42
 
 | File | Content |
 | --- | --- |
-| `<output>.png` | the image with k colors |
-| `<output>_compare.png` | original (left) and result (right) side by side |
-| `<output>_palette.png` | the k colors, most used first (with `--palette`) |
+| `<name>_k<k>.png` | the image with k colors |
+| `<name>_k<k>_compare.png` | original (left) and result (right) side by side |
+| `<name>_k<k>_palette.png` | the k colors, most used first (option 3 / `--palette`) |
+
+**Interactive results are temporary.** While the program runs they are saved in `output/`
+and opened in your image viewer. When the program ends (Quit, Ctrl+C or an error),
+every file it created is deleted, so each start is fresh. Other files in `output/` are
+never touched.
+
+To **keep** a result, give an output path on the command line. Files at that path are never deleted:
+
+```bash
+quantize photo.jpg -k 8 -o keep.png
+```
 
 ## How it works
 

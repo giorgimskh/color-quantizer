@@ -8,8 +8,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
-
 from color_quantizer.image_io import load_image
 
 
@@ -84,17 +82,6 @@ def ask_image() -> tuple[Path, np.ndarray]:
             return path, load_image(path)
         except (OSError, ValueError) as exc:
             _complain(f"{exc}. Try again.")
-
-
-def ask_output(default: Path) -> Path:
-    """Ask for the output path; Enter accepts ``default``. The format must be known."""
-    extensions = Image.registered_extensions()
-    while True:
-        text = ask(f"Output file [{default}]: ")
-        path = clean_path(text) if text else default
-        if path.suffix.lower() in extensions:
-            return path
-        _complain(f"Unknown image format {path.suffix or '(none)'!r}; use e.g. .png or .jpg.")
 
 
 def ask_int(prompt: str, minimum: int, empty: int | None) -> int | None:
