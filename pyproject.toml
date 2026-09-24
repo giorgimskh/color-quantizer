@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "color-quantizer"
+version = "0.1.0"
+description = "Reduce an image to k colors with k-means implemented from scratch."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy", "Pillow"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+quantize = "color_quantizer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
