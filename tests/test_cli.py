@@ -250,3 +250,47 @@ def test_clean_path():
 def test_parse_k_rejects(text):
     with pytest.raises(ValueError):
         parse_k(text)
+
+
+# --- Intro text ----------------------------------------------------------------
+
+
+def test_intro_printed_before_first_question(tmp_path, input_image, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    seen_before_first_prompt = []
+    replies = iter([str(input_image), "2", "", "n", "n", ""])
+
+    def fake_input(prompt):
+        if not seen_before_first_prompt:
+            seen_before_first_prompt.append(capsys.readouterr().out)
+        return next(replies)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert main([]) == 0
+    intro = seen_before_first_prompt[0]
+    assert intro.startswith("+---")
+    assert "What it does:" in intro
+    for question in ["1. Image path", "2. Number of colors k", "3. Output file",
+                     "4. Save the palette", "5. Open the result"]:
+        assert question in intro
+    assert "<output>_compare.png" in intro
+
+
+def test_intro_lists_only_questions_that_will_be_asked(tmp_path, input_image, answers, capsys):
+    answers("3", "")  # k=3, then quit (viewer not asked because of --show)
+    assert main([str(input_image), "-o", str(tmp_path / "q.png"), "--show", "--no-compare"]) == 0
+    out = capsys.readouterr().out
+    assert "1. Number of colors k" in out
+    assert "Image path" not in out and "Open the result" not in out
+    assert "_compare.png" not in out.split("Loaded")[0]
+
+
+def test_no_intro_when_quiet(tmp_path, input_image, answers, capsys):
+    answers("3", "n", "")
+    main([str(input_image), "-o", str(tmp_path / "q.png"), "-q"])
+    assert "What it does" not in capsys.readouterr().out
+
+
+def test_no_intro_when_all_arguments_given(tmp_path, input_image, capsys, no_input):
+    main([str(input_image), "-k", "3", "-o", str(tmp_path / "q.png")])
+    assert "What it does" not in capsys.readouterr().out

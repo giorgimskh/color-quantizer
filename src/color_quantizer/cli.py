@@ -103,6 +103,57 @@ def default_output(input_path: Path, k: int) -> Path:
     return Path(f"{input_path.stem}_k{k}.png")
 
 
+def build_intro(args: argparse.Namespace) -> str:
+    """Explanation printed before the questions of an interactive run.
+
+    Lists only the questions that will actually be asked, given ``args``.
+    """
+    wizard = args.input is None or args.output is None
+    questions = []
+    if args.input is None:
+        questions.append("Image path - you can drag the image into this terminal")
+    if args.colors is None:
+        questions.append("Number of colors k - e.g. 4 (bold poster look), 8, 16, 32 (subtle)")
+    if args.output is None:
+        questions.append("Output file - press Enter to keep the suggested name")
+    ask_palette = wizard and not args.palette
+    if ask_palette:
+        questions.append("Save the palette as an image too?")
+    if not args.show:
+        questions.append("Open the result in your image viewer?")
+
+    title = f"color-quantizer {__version__} - reduce an image to k colors"
+    lines = [
+        "+" + "-" * (len(title) + 4) + "+",
+        f"|  {title}  |",
+        "+" + "-" * (len(title) + 4) + "+",
+        "",
+        "What it does:",
+        "  Groups similar colors of your image into k clusters with k-means",
+        "  and repaints every pixel with its cluster's average color.",
+        "  A small k gives a bold poster look; a large k stays close to the original.",
+        "",
+    ]
+    if questions:
+        lines.append("You will be asked:")
+        lines += [f"  {i}. {q}" for i, q in enumerate(questions, 1)]
+        lines.append("")
+    lines.append("Files saved:")
+    lines.append("  <output>.png           the image with k colors")
+    if not args.no_compare:
+        lines.append("  <output>_compare.png   original and result side by side")
+    if args.palette or ask_palette:
+        note = "" if args.palette else " (if you choose)"
+        lines.append(f"  <output>_palette.png   the k colors as swatches{note}")
+    lines += [
+        "",
+        "After each result you can try another k. Ctrl+C quits at any time.",
+        "All options, for use without questions: quantize --help",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def _use_color() -> bool:
     return sys.stdout.isatty() and "NO_COLOR" not in os.environ
 
@@ -179,6 +230,8 @@ def run(args: argparse.Namespace) -> int:
     """Gather missing values interactively, then quantize (possibly repeatedly)."""
     wizard = args.input is None or args.output is None
     interactive = wizard or args.colors is None or args.interactive
+    if interactive and not args.quiet:
+        print(build_intro(args), flush=True)
 
     if args.input is None:
         input_path, image = ask_image()

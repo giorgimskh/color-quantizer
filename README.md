@@ -12,9 +12,22 @@ pytest
 ## Usage
 
 ### Guided (interactive)
-Run `quantize` with no arguments and answer the questions:
+Run `quantize` with no arguments. It first explains what it does, what it
+will ask and which files it saves, then asks the questions:
 ```
 $ quantize
++-------------------------------------------------------+
+|  color-quantizer 0.1.0 - reduce an image to k colors  |
++-------------------------------------------------------+
+
+What it does:
+  Groups similar colors of your image into k clusters with k-means
+  ...
+
+You will be asked:
+  1. Image path - you can drag the image into this terminal
+  ...
+
 Image path: ~/Pictures/cherry.png
 Loaded cherry.png: 1920x1080 pixels, 93,795 distinct colors
 How many colors (k)? 8
