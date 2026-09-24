@@ -26,5 +26,5 @@ K-means rules: squared Euclidean distance (no sqrt), fully vectorized (no per-pi
 
 ## Workflow rules
 - Complete one milestone at a time; run tests before calling it done.
-- Milestones 2–3 (the k-means algorithm): the user implements these THEMSELVES. Only create function stubs with docstrings and write tests. Do not implement the algorithm unless explicitly asked.
+- All five milestones are complete. The k-means algorithm (`kmeans.py`) was originally reserved for the user to write; it was implemented by Claude at the user's explicit request. Change it only when asked.
 - Commit after each milestone with a clear message.
