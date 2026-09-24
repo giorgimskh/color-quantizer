@@ -101,3 +101,27 @@ def test_missing_input_fails_before_prompt(tmp_path, monkeypatch):
 
     monkeypatch.setattr("builtins.input", no_prompt)
     assert main([str(tmp_path / "nope.png"), "-o", str(tmp_path / "o.png")]) == 1
+
+
+def test_comparison_saved_by_default(tmp_path, input_image):
+    out = tmp_path / "q.png"
+    assert main([str(input_image), "-k", "4", "-o", str(out), "--seed", "0"]) == 0
+    combo = load_image(tmp_path / "q_compare.png")
+    assert combo.shape == (20, 2 * 30 + 10, 3)
+    np.testing.assert_array_equal(combo[:, :30], load_image(input_image))
+    np.testing.assert_array_equal(combo[:, 40:], load_image(out))
+
+
+def test_no_compare_flag(tmp_path, input_image):
+    out = tmp_path / "q.png"
+    assert main([str(input_image), "-k", "4", "-o", str(out), "--no-compare"]) == 0
+    assert out.exists()
+    assert not (tmp_path / "q_compare.png").exists()
+
+
+def test_show_opens_viewer(tmp_path, input_image, monkeypatch):
+    shown = []
+    monkeypatch.setattr("PIL.Image.Image.show", lambda self, title=None: shown.append(self.size))
+    out = tmp_path / "q.png"
+    assert main([str(input_image), "-k", "3", "-o", str(out), "--show", "--no-compare"]) == 0
+    assert shown == [(70, 20)]

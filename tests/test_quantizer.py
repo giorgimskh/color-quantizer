@@ -3,7 +3,8 @@
 import numpy as np
 import pytest
 
-from color_quantizer.quantizer import palette_image, quantize, sample_pixels
+from color_quantizer.kmeans import kmeans
+from color_quantizer.quantizer import palette_image, quantize, sample_pixels, side_by_side
 
 
 def gradient(h: int = 40, w: int = 60) -> np.ndarray:
@@ -72,3 +73,29 @@ def test_palette_image():
     assert strip.shape == (3, 6, 3)
     np.testing.assert_array_equal(strip[0, 0], [1, 2, 3])
     np.testing.assert_array_equal(strip[2, 5], [4, 5, 6])
+
+
+def test_pixels_are_rounded_centroid_colors():
+    img = gradient()
+    out, palette = quantize(img, 5, seed=4)
+    # Same seed path as quantize(): sample is the full image (N < 50k).
+    rng = np.random.default_rng(4)
+    centroids = kmeans(img.reshape(-1, 3), 5, seed=rng).centroids
+    rounded = {tuple(c) for c in np.clip(np.rint(centroids), 0, 255).astype(np.uint8)}
+    assert {tuple(c) for c in palette} == rounded
+    assert {tuple(c) for c in out.reshape(-1, 3)} <= rounded
+
+
+def test_side_by_side():
+    a = np.full((4, 3, 3), 10, np.uint8)
+    b = np.full((4, 3, 3), 200, np.uint8)
+    combo = side_by_side(a, b, gap=2)
+    assert combo.shape == (4, 8, 3) and combo.dtype == np.uint8
+    np.testing.assert_array_equal(combo[:, :3], a)
+    np.testing.assert_array_equal(combo[:, 3:5], 255)
+    np.testing.assert_array_equal(combo[:, 5:], b)
+
+
+def test_side_by_side_shape_mismatch():
+    with pytest.raises(ValueError):
+        side_by_side(np.zeros((4, 3, 3), np.uint8), np.zeros((4, 4, 3), np.uint8))

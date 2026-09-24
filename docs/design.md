@@ -14,6 +14,9 @@ A Python command-line tool that reduces an image to k colors using k-means clust
   ```
 - Allowed dependencies: numpy, Pillow (image I/O only). Dev: pytest.
   NO scikit-learn, scipy.cluster, or other ML/clustering libraries.
+- Output: the reconstructed image (each pixel = its centroid color, rounded to integers),
+  plus `<output>_compare.png` showing the original and reconstruction side by side
+  (`--no-compare` to skip, `--show` to open it in a viewer).
 - This is a CLI-only project. No web API, server, or GUI.
 - CLI usage: `quantize <input> [-k <int>] -o <output> [--seed <int>] [--max-iter <int>] [--palette]`
   (exposed via a `[project.scripts]` entry point; if `-k` is omitted, the user is prompted for it)

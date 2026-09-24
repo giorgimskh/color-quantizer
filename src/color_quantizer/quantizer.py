@@ -101,3 +101,27 @@ def palette_image(palette: np.ndarray, swatch: int = 50) -> np.ndarray:
         raise ValueError(f"Expected palette of shape (k, 3), got {palette.shape}")
     strip = np.repeat(palette[None, :, :].astype(np.uint8), swatch, axis=1)
     return np.repeat(strip, swatch, axis=0)
+
+
+def side_by_side(
+    original: np.ndarray, reconstructed: np.ndarray, gap: int = 10
+) -> np.ndarray:
+    """Place the original (left) and reconstructed (right) images next to each other.
+
+    Args:
+        original: (H, W, 3) uint8 image.
+        reconstructed: (H, W, 3) uint8 image of the same shape.
+        gap: Width in pixels of the white separator strip.
+
+    Returns:
+        (H, 2 * W + gap, 3) uint8 image.
+
+    Raises:
+        ValueError: If the two images have different shapes.
+    """
+    if original.shape != reconstructed.shape:
+        raise ValueError(
+            f"Shape mismatch: {original.shape} vs {reconstructed.shape}"
+        )
+    separator = np.full((original.shape[0], gap, 3), 255, dtype=np.uint8)
+    return np.hstack([original, separator, reconstructed]).astype(np.uint8)

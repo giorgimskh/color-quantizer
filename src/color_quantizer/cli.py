@@ -5,9 +5,11 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from PIL import Image
+
 from color_quantizer import __version__
 from color_quantizer.image_io import load_image, save_image
-from color_quantizer.quantizer import palette_image, quantize
+from color_quantizer.quantizer import palette_image, quantize, side_by_side
 
 
 def _positive_int(value: str) -> int:
@@ -47,6 +49,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also save the palette as <output>_palette.png and print hex colors",
     )
+    parser.add_argument(
+        "--no-compare",
+        action="store_true",
+        help="do not save the side-by-side <output>_compare.png (original | reconstructed)",
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="open the original and reconstructed images side by side in an image viewer",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -68,6 +80,11 @@ def prompt_for_k() -> int:
 def palette_path(output: Path) -> Path:
     """Path of the palette image saved next to ``output``."""
     return output.with_name(f"{output.stem}_palette.png")
+
+
+def compare_path(output: Path) -> Path:
+    """Path of the side-by-side comparison image saved next to ``output``."""
+    return output.with_name(f"{output.stem}_compare.png")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -93,6 +110,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         quantized, palette = quantize(image, k, seed=args.seed, max_iter=args.max_iter)
         save_image(quantized, args.output)
         print(f"Saved {k}-color image to {args.output}")
+
+        comparison = side_by_side(image, quantized)
+        if not args.no_compare:
+            path = compare_path(args.output)
+            save_image(comparison, path)
+            print(f"Saved comparison (original | reconstructed) to {path}")
+        if args.show:
+            Image.fromarray(comparison).show(title="original | reconstructed")
 
         if args.palette:
             path = palette_path(args.output)
