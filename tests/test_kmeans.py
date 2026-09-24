@@ -134,3 +134,10 @@ def test_invalid_params_raise():
         kmeans(x, 2, init="bogus")
     with pytest.raises(ValueError):
         kmeans(np.zeros((0, 3)), 1)
+
+
+def test_converged_flag():
+    x = blobs([[0, 0, 0], [200, 200, 200]])
+    assert kmeans(x, 2, seed=0).converged
+    noisy = np.random.default_rng(2).random((500, 3)) * 255
+    assert not kmeans(noisy, 8, max_iter=1, tol=0, seed=0).converged

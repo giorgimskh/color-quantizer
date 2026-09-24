@@ -21,12 +21,15 @@ class KMeansResult:
         labels: (N,) index of the nearest centroid for each point.
         n_iter: Number of update iterations performed.
         inertia: Sum of squared distances from each point to its centroid.
+        converged: True if a stopping criterion (no change / tolerance) was met
+            before ``max_iter`` ran out.
     """
 
     centroids: np.ndarray
     labels: np.ndarray
     n_iter: int
     inertia: float
+    converged: bool = False
 
 
 def squared_distances(points: np.ndarray, centroids: np.ndarray) -> np.ndarray:
@@ -172,6 +175,7 @@ def kmeans(
 
     labels = assign(x, centroids)
     n_iter = 0
+    converged = False
     for n_iter in range(1, max_iter + 1):
         new_centroids = update_centroids(x, labels, k)
         shift = np.max(np.sum((new_centroids - centroids) ** 2, axis=1))
@@ -180,7 +184,8 @@ def kmeans(
         changed = np.any(new_labels != labels)
         labels = new_labels
         if not changed or shift <= tol**2:
+            converged = True
             break
 
     inertia = float(np.sum((x - centroids[labels]) ** 2))
-    return KMeansResult(centroids, labels, n_iter, inertia)
+    return KMeansResult(centroids, labels, n_iter, inertia, converged)

@@ -1,5 +1,8 @@
 """Quantization pipeline: sample -> fit -> map all pixels -> rebuild image."""
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 import numpy as np
 
 from color_quantizer.image_io import image_to_pixels, pixels_to_image
@@ -39,6 +42,91 @@ def map_pixels(pixels: np.ndarray, centroids: np.ndarray) -> np.ndarray:
     return labels
 
 
+@dataclass
+class QuantizeResult:
+    """Output of :func:`quantize_with_stats`.
+
+    Attributes:
+        image: (H, W, 3) uint8 reconstructed image.
+        palette: (k, 3) uint8 colors, most frequent first.
+        counts: (k,) number of pixels using each palette color.
+        n_iter: K-means iterations performed.
+        converged: Whether k-means met a stopping criterion before max_iter.
+        n_sampled: Number of pixels k-means was trained on.
+    """
+
+    image: np.ndarray
+    palette: np.ndarray
+    counts: np.ndarray
+    n_iter: int
+    converged: bool
+    n_sampled: int
+
+
+def quantize_with_stats(
+    image: np.ndarray,
+    k: int,
+    *,
+    seed: SeedLike = None,
+    max_iter: int = 100,
+    sample_size: int = DEFAULT_SAMPLE_SIZE,
+    progress: Callable[[str], None] | None = None,
+) -> QuantizeResult:
+    """Reduce an image to at most ``k`` colors and report how it went.
+
+    K-means is trained on a random sample of pixels, then every pixel is
+    mapped once to its nearest centroid, whose color is rounded to integers.
+
+    Args:
+        image: (H, W, 3) uint8 image.
+        k: Number of colors.
+        seed: Seed or Generator for reproducible results.
+        max_iter: Maximum k-means iterations.
+        sample_size: Number of pixels used for training.
+        progress: Optional callback receiving a message as each stage starts
+            and finishes.
+
+    Returns:
+        A :class:`QuantizeResult`.
+
+    Raises:
+        ValueError: On invalid image shape or parameters.
+    """
+    report = progress or (lambda message: None)
+    height, width = image.shape[:2]
+    pixels = image_to_pixels(image)
+    rng = np.random.default_rng(seed)
+
+    sample = sample_pixels(pixels, sample_size, rng)
+    report(f"Training k-means (k={k}) on {len(sample):,} of {len(pixels):,} pixels...")
+    result = kmeans(sample, k, max_iter=max_iter, seed=rng)
+    if result.converged:
+        report(f"  converged after {result.n_iter} iterations")
+    else:
+        report(f"  stopped at the {result.n_iter}-iteration limit (not fully converged)")
+
+    report(f"Mapping all {len(pixels):,} pixels to their nearest color...")
+    labels = map_pixels(pixels, result.centroids)
+    palette = np.clip(np.rint(result.centroids), 0, 255).astype(np.uint8)
+
+    # Sort palette by frequency so palette output is meaningful.
+    counts = np.bincount(labels, minlength=k)
+    order = np.argsort(-counts, kind="stable")
+    rank = np.empty_like(order)
+    rank[order] = np.arange(k)
+    palette = palette[order]
+    labels = rank[labels]
+
+    return QuantizeResult(
+        image=pixels_to_image(palette[labels], height, width),
+        palette=palette,
+        counts=counts[order],
+        n_iter=result.n_iter,
+        converged=result.converged,
+        n_sampled=len(sample),
+    )
+
+
 def quantize(
     image: np.ndarray,
     k: int,
@@ -49,42 +137,28 @@ def quantize(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Reduce an image to at most ``k`` colors.
 
-    K-means is trained on a random sample of pixels, then every pixel is
-    mapped once to its nearest centroid.
-
-    Args:
-        image: (H, W, 3) uint8 image.
-        k: Number of colors.
-        seed: Seed or Generator for reproducible results.
-        max_iter: Maximum k-means iterations.
-        sample_size: Number of pixels used for training.
-
     Returns:
-        ``(quantized, palette)``: the (H, W, 3) uint8 quantized image and the
-        (k, 3) uint8 palette, ordered by how many pixels use each color
-        (most frequent first).
-
-    Raises:
-        ValueError: On invalid image shape or parameters.
+        ``(quantized, palette)``: the (H, W, 3) uint8 reconstructed image and
+        the (k, 3) uint8 palette, most frequent color first. See
+        :func:`quantize_with_stats` for details.
     """
-    height, width = image.shape[:2]
-    pixels = image_to_pixels(image)
-    rng = np.random.default_rng(seed)
+    result = quantize_with_stats(
+        image, k, seed=seed, max_iter=max_iter, sample_size=sample_size
+    )
+    return result.image, result.palette
 
-    sample = sample_pixels(pixels, sample_size, rng)
-    result = kmeans(sample, k, max_iter=max_iter, seed=rng)
 
-    labels = map_pixels(pixels, result.centroids)
-    palette = np.clip(np.rint(result.centroids), 0, 255).astype(np.uint8)
+def count_colors(image: np.ndarray) -> int:
+    """Number of distinct RGB colors in an (H, W, 3) uint8 image."""
+    px = image_to_pixels(image).astype(np.uint32)
+    codes = (px[:, 0] << 16) | (px[:, 1] << 8) | px[:, 2]
+    return int(np.unique(codes).size)
 
-    # Sort palette by frequency so --palette output is meaningful.
-    order = np.argsort(-np.bincount(labels, minlength=k), kind="stable")
-    rank = np.empty_like(order)
-    rank[order] = np.arange(k)
-    palette = palette[order]
-    labels = rank[labels]
 
-    return pixels_to_image(palette[labels], height, width), palette
+def color_error(original: np.ndarray, reconstructed: np.ndarray) -> float:
+    """Root-mean-square difference between two images, on the 0-255 scale."""
+    diff = original.astype(np.float32) - reconstructed.astype(np.float32)
+    return float(np.sqrt(np.mean(diff * diff)))
 
 
 def palette_image(palette: np.ndarray, swatch: int = 50) -> np.ndarray:
