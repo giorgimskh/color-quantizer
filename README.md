@@ -49,9 +49,22 @@ What it does:
 Image path: ~/Pictures/autumn.png
 Loaded autumn.png: 1920x1080 pixels, 197,414 distinct colors
 How many colors (k)? 8
+
+Options (yes/no options switch when picked; the others ask for a value):
+  1. Random seed             (now: random)
+  2. Max k-means iterations  (now: 100)
+  3. Save palette image      (now: no)
+  4. Save comparison image   (now: yes)
+  5. Open result in viewer   (now: no)
+Enter numbers separated by spaces (e.g. 1 3), or press Enter to keep: 1 3 5
+Random seed (whole number >= 0, Enter = random): 42
+Options now:
+  - Random seed             (now: 42)
+  - Max k-means iterations  (now: 100)
+  - Save palette image      (now: yes)
+  - Save comparison image   (now: yes)
+  - Open result in viewer   (now: yes)
 Output file [autumn_k8.png]:
-Save palette image too? [y/N] y
-Open result in image viewer? [Y/n]
 Training k-means (k=8) on 50,000 of 2,073,600 pixels...
   converged after 22 iterations
 Mapping all 2,073,600 pixels to their nearest color...
@@ -60,23 +73,34 @@ Saved comparison (original | reconstructed) to autumn_k8_compare.png
 Saved palette to autumn_k8_palette.png
 Done in 0.3s
   Colors:      197,414 -> 8
-  Color error: 13.3 (RMS, 0-255 scale)
+  Color error: 13.5 (RMS, 0-255 scale)
   Palette (most used first):
-    #783e27   21.1%
-    #8b6445   18.8%
+    #783b26   20.8%
+    #73523e   15.3%
     ...
 
-Next: type a number for a new k, i to change the image, or Enter to quit: 16
+What next?
+  1. Try a different number of colors (k) on this image
+  2. Choose another image
+  3. Change options (seed, iterations, palette, comparison, viewer)
+  4. Quit
+Choose 1-4: 1
+How many colors (k)? [8] 16
 ...
 ```
 
-After each result you can:
+**Options list** (shown right after you enter k): pick any number of options at once, e.g. `1 3 5`.
+The yes/no options (3-5) switch on or off when picked. Seed and iterations ask for a value.
+Press Enter to keep everything as it is.
 
-| Type | To |
+**What next? menu** (shown after each result):
+
+| Choose | To |
 | --- | --- |
-| a number, e.g. `16` | run again on the same image with a new k |
-| `i` | switch to another image (Enter keeps the current k) |
-| Enter | quit |
+| `1` | run again on the same image with a different k (Enter keeps the current k) |
+| `2` | choose another image |
+| `3` | change options, then return to the menu |
+| `4` | quit |
 
 Tips: drag an image into the terminal to paste its path, press Enter to accept a `[default]`, and use Ctrl+C to quit at any time.
 
@@ -94,12 +118,12 @@ quantize photo.jpg -k 4 -o poster.png --palette --show --seed 42
 | `input` | image to quantize (asked if omitted) |
 | `-k`, `--colors` | number of colors, ≥ 1 (asked if omitted) |
 | `-o`, `--output` | output image path; format from the extension (asked if omitted) |
-| `--seed` | random seed; the same seed gives the same result |
+| `--seed` | random seed (≥ 0); the same seed gives the same result |
 | `--max-iter` | maximum k-means iterations (default 100) |
 | `--palette` | also save the colors as a swatch strip |
 | `--no-compare` | don't save the side-by-side comparison |
 | `--show` | open the comparison in your image viewer |
-| `-i`, `--interactive` | after each result, offer a new k or image |
+| `-i`, `--interactive` | show the options list and the What next? menu even when all arguments are given |
 | `-q`, `--quiet` | print only saved files and errors |
 
 ### Output files

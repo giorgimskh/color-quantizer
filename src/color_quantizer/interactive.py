@@ -33,20 +33,6 @@ def _complain(message: str) -> None:
     print(f"  {message}", file=sys.stderr)
 
 
-def ask_yes_no(question: str, default: bool) -> bool:
-    """Ask a yes/no question; Enter picks ``default``."""
-    hint = "[Y/n]" if default else "[y/N]"
-    while True:
-        answer = ask(f"{question} {hint} ").lower()
-        if not answer:
-            return default
-        if answer in ("y", "yes"):
-            return True
-        if answer in ("n", "no"):
-            return False
-        _complain("Please answer y or n.")
-
-
 def parse_k(text: str) -> int:
     """Parse a number of colors (an integer >= 1).
 
@@ -111,22 +97,59 @@ def ask_output(default: Path) -> Path:
         _complain(f"Unknown image format {path.suffix or '(none)'!r}; use e.g. .png or .jpg.")
 
 
-NEXT_PROMPT = "\nNext: type a number for a new k, i to change the image, or Enter to quit: "
-
-
-def ask_next() -> int | str | None:
-    """Ask what to do after a result.
-
-    Returns:
-        A new k (int), ``"image"`` to switch to another image, or None to quit.
-    """
+def ask_int(prompt: str, minimum: int, empty: int | None) -> int | None:
+    """Ask for a whole number >= ``minimum``; an empty answer returns ``empty``."""
     while True:
-        answer = ask(NEXT_PROMPT).lower()
-        if answer in ("", "q", "quit"):
-            return None
-        if answer in ("i", "image"):
-            return "image"
+        answer = ask(prompt)
+        if not answer:
+            return empty
         try:
-            return parse_k(answer)
+            value = int(answer)
         except ValueError:
-            _complain(f"{answer!r} is not a choice. Type a number (e.g. 16), i, or press Enter.")
+            _complain(f"{answer!r} is not a whole number.")
+            continue
+        if value >= minimum:
+            return value
+        _complain(f"Please enter a number >= {minimum}.")
+
+
+def _print_items(title: str, items: list[str]) -> None:
+    print(title)
+    for number, item in enumerate(items, 1):
+        print(f"  {number}. {item}")
+
+
+def ask_menu(title: str, items: list[str]) -> int:
+    """Show a numbered menu and return the chosen item's number (1-based)."""
+    _print_items(title, items)
+    while True:
+        answer = ask(f"Choose 1-{len(items)}: ")
+        if answer.isdigit() and 1 <= int(answer) <= len(items):
+            return int(answer)
+        _complain(f"Please enter a number from 1 to {len(items)}.")
+
+
+def parse_choices(text: str, count: int) -> list[int]:
+    """Parse numbers like ``"1 3"`` or ``"1,3"`` into a list of distinct choices.
+
+    Raises:
+        ValueError: If any entry is not a number from 1 to ``count``.
+    """
+    choices: list[int] = []
+    for part in text.replace(",", " ").split():
+        if not (part.isdigit() and 1 <= int(part) <= count):
+            raise ValueError(f"{part!r} is not an option (1-{count})")
+        if int(part) not in choices:
+            choices.append(int(part))
+    return choices
+
+
+def ask_multi(title: str, items: list[str]) -> list[int]:
+    """Show a numbered list; the user picks any number of items (Enter picks none)."""
+    _print_items(title, items)
+    while True:
+        answer = ask("Enter numbers separated by spaces (e.g. 1 3), or press Enter to keep: ")
+        try:
+            return parse_choices(answer, len(items))
+        except ValueError as exc:
+            _complain(f"{exc}. Try again.")

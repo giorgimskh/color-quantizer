@@ -7,7 +7,7 @@ import pytest
 
 from color_quantizer.cli import main
 from color_quantizer.image_io import load_image, save_image
-from color_quantizer.interactive import clean_path, parse_k
+from color_quantizer.interactive import clean_path, parse_choices, parse_k
 
 
 @pytest.fixture
@@ -167,11 +167,16 @@ def test_bad_arguments_exit_2(argv):
 
 
 # --- Interactive use -----------------------------------------------------------
+# Answer order in an interactive run: [image path], [k], options list,
+# [output file], then the "What next?" menu after each result.
+
+KEEP = ""  # Enter: keep options / accept default
+QUIT = "4"  # "What next?" menu: Quit
 
 
 def test_k_prompted_when_omitted(tmp_path, input_image, answers, capsys):
     out = tmp_path / "q.png"
-    answers("abc", "0", " 3 ", "n", "")  # two bad k's, k=3, no viewer, quit
+    answers("abc", "0", " 3 ", KEEP, QUIT)  # two bad k's, k=3
     assert main([str(input_image), "-o", str(out), "--seed", "0"]) == 0
     assert n_colors(out) <= 3
     captured = capsys.readouterr()
@@ -180,17 +185,16 @@ def test_k_prompted_when_omitted(tmp_path, input_image, answers, capsys):
     assert "Bye!" in captured.out
 
 
-def test_full_wizard_with_try_again_loop(tmp_path, input_image, answers, capsys, monkeypatch, viewer):
+def test_full_wizard(tmp_path, input_image, answers, capsys, monkeypatch, viewer):
     monkeypatch.chdir(tmp_path)
     prompts = answers(
         str(tmp_path / "missing.png"),  # bad path -> asked again
         f"'{input_image}'",  # quoted, as when drag-and-dropped
         "5",  # k
-        "",  # accept default output name
-        "y",  # save palette
-        "",  # open viewer (default yes)
-        "2",  # try another k
-        "",  # quit
+        "3 5",  # options: palette on, viewer on
+        KEEP,  # default output name
+        "1", "2",  # What next -> another k: 2
+        QUIT,
     )
     assert main([]) == 0
     assert prompts[:2] == ["Image path: ", "Image path: "]
@@ -205,9 +209,84 @@ def test_full_wizard_with_try_again_loop(tmp_path, input_image, answers, capsys,
     assert "Bye!" in captured.out
 
 
+def test_options_list_shown_after_k(tmp_path, input_image, answers, capsys):
+    prompts = answers("3", KEEP, QUIT)
+    main([str(input_image), "-o", str(tmp_path / "q.png")])
+    out = capsys.readouterr().out
+    for line in ["1. Random seed", "2. Max k-means iterations", "3. Save palette image",
+                 "4. Save comparison image", "5. Open result in viewer"]:
+        assert line in out
+    assert prompts[0] == "How many colors (k)? "
+    assert prompts[1].startswith("Enter numbers separated by spaces")
+
+
+def test_options_multiple_choices_with_values(tmp_path, input_image, answers, capsys):
+    out = tmp_path / "q.png"
+    prompts = answers(
+        "3",
+        "1 2 4 9",  # 9 is invalid -> asked again
+        "1, 2, 4, 3",  # commas also work
+        "-5", "7",  # seed: negative rejected, then 7
+        "abc", "25",  # max iterations
+        QUIT,
+    )
+    assert main([str(input_image), "-o", str(out)]) == 0
+    assert "Random seed (whole number >= 0, Enter = random): " in prompts
+    assert "Max iterations [100]: " in prompts
+    assert out.exists()
+    assert not (tmp_path / "q_compare.png").exists()  # option 4 switched off
+    assert (tmp_path / "q_palette.png").exists()  # option 3 switched on
+    captured = capsys.readouterr()
+    assert "'9' is not an option (1-5)" in captured.err
+    assert "Random seed             (now: 7)" in captured.out
+    assert "Max k-means iterations  (now: 25)" in captured.out
+
+
+def test_options_seed_makes_rounds_reproducible(tmp_path, input_image, answers):
+    a, b = tmp_path / "a.png", tmp_path / "b.png"
+    for out in (a, b):
+        answers("4", "1", "11", QUIT)
+        main([str(input_image), "-o", str(out)])
+    np.testing.assert_array_equal(load_image(a), load_image(b))
+
+
+def test_cli_flags_preset_options(tmp_path, input_image, answers, capsys):
+    answers("3", KEEP, QUIT)
+    main([str(input_image), "-o", str(tmp_path / "q.png"), "--seed", "5", "--palette", "--no-compare"])
+    out = capsys.readouterr().out
+    assert "(now: 5)" in out
+    assert "Save palette image      (now: yes)" in out
+    assert "Save comparison image   (now: no)" in out
+
+
+def test_what_next_menu_is_numbered(tmp_path, input_image, answers, capsys):
+    prompts = answers("3", KEEP, "0", "abc", QUIT)
+    assert main([str(input_image), "-o", str(tmp_path / "q.png")]) == 0
+    captured = capsys.readouterr()
+    for line in ["What next?", "1. Try a different number of colors (k)",
+                 "2. Choose another image", "3. Change options", "4. Quit"]:
+        assert line in captured.out
+    assert prompts[-1] == "Choose 1-4: "
+    assert captured.err.count("Please enter a number from 1 to 4") == 2
+
+
+def test_what_next_change_options_then_run(tmp_path, input_image, answers):
+    out = tmp_path / "q.png"
+    answers(
+        "4", KEEP,  # first round: k=4, default options
+        "3", "3",  # What next -> change options -> palette on
+        "1", KEEP,  # What next -> another k, Enter keeps k=4
+        QUIT,
+    )
+    assert main([str(input_image), "-o", str(out)]) == 0
+    assert (tmp_path / "q_k4.png").exists()
+    assert (tmp_path / "q_k4_palette.png").exists()
+    assert not (tmp_path / "q_palette.png").exists()
+
+
 def test_wizard_rejects_unknown_output_format(tmp_path, input_image, answers, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    answers(str(input_image), "2", "result.xyz", "result.png", "n", "n", "")
+    answers(str(input_image), "2", KEEP, "result.xyz", "result.png", QUIT)
     assert main([]) == 0
     assert (tmp_path / "result.png").exists()
     assert "Unknown image format" in capsys.readouterr().err
@@ -215,10 +294,10 @@ def test_wizard_rejects_unknown_output_format(tmp_path, input_image, answers, ca
 
 def test_interactive_flag_names_extra_outputs_after_custom_output(tmp_path, input_image, answers):
     out = tmp_path / "art.png"
-    prompts = answers("n", "2", "")  # no viewer, then k=2, then quit
+    prompts = answers(KEEP, "1", "2", QUIT)
     assert main([str(input_image), "-k", "4", "-o", str(out), "-i", "--no-compare"]) == 0
     assert out.exists() and (tmp_path / "art_k2.png").exists()
-    assert prompts[1].startswith("\nNext: type a number for a new k, i to change the image")
+    assert prompts[0].startswith("Enter numbers separated by spaces")  # options still offered
 
 
 def test_cancel_at_first_question_returns_error(tmp_path, input_image, answers, capsys):
@@ -227,8 +306,8 @@ def test_cancel_at_first_question_returns_error(tmp_path, input_image, answers, 
     assert "cancelled" in capsys.readouterr().err
 
 
-def test_ctrl_c_at_try_again_quits_cleanly(tmp_path, input_image, answers, capsys):
-    answers("n", KeyboardInterrupt())
+def test_ctrl_c_at_menu_quits_cleanly(tmp_path, input_image, answers, capsys):
+    answers(KEEP, KeyboardInterrupt())
     assert main([str(input_image), "-k", "2", "-o", str(tmp_path / "q.png"), "-i"]) == 0
     assert "Bye!" in capsys.readouterr().out
 
@@ -237,63 +316,10 @@ def test_missing_input_fails_before_prompt(tmp_path, no_input):
     assert main([str(tmp_path / "nope.png"), "-o", str(tmp_path / "o.png")]) == 1
 
 
-# --- Helpers -------------------------------------------------------------------
-
-
-def test_clean_path():
-    assert clean_path("'/a b/c.png'") == Path("/a b/c.png")
-    assert clean_path('"x.png"') == Path("x.png")
-    assert clean_path("~/p.png") == Path.home() / "p.png"
-
-
-@pytest.mark.parametrize("text", ["0", "-2", "abc", "", "1.5"])
-def test_parse_k_rejects(text):
-    with pytest.raises(ValueError):
-        parse_k(text)
-
-
-# --- Intro text ----------------------------------------------------------------
-
-
-def test_intro_printed_before_first_question(tmp_path, input_image, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
-    seen_before_first_prompt = []
-    replies = iter([str(input_image), "2", "", "n", "n", ""])
-
-    def fake_input(prompt):
-        if not seen_before_first_prompt:
-            seen_before_first_prompt.append(capsys.readouterr().out)
-        return next(replies)
-
-    monkeypatch.setattr("builtins.input", fake_input)
-    assert main([]) == 0
-    intro = seen_before_first_prompt[0]
-    assert intro.startswith("+---")
-    assert "What it does:" in intro
-    for question in ["1. Image path", "2. Number of colors k", "3. Output file",
-                     "4. Save the palette", "5. Open the result"]:
-        assert question in intro
-    assert "<output>_compare.png" in intro
-
-
-def test_intro_lists_only_questions_that_will_be_asked(tmp_path, input_image, answers, capsys):
-    answers("3", "")  # k=3, then quit (viewer not asked because of --show)
-    assert main([str(input_image), "-o", str(tmp_path / "q.png"), "--show", "--no-compare"]) == 0
-    out = capsys.readouterr().out
-    assert "1. Number of colors k" in out
-    assert "Image path" not in out and "Open the result" not in out
-    assert "_compare.png" not in out.split("Loaded")[0]
-
-
-def test_no_intro_when_quiet(tmp_path, input_image, answers, capsys):
-    answers("3", "n", "")
-    main([str(input_image), "-o", str(tmp_path / "q.png"), "-q"])
-    assert "What it does" not in capsys.readouterr().out
-
-
-def test_no_intro_when_all_arguments_given(tmp_path, input_image, capsys, no_input):
-    main([str(input_image), "-k", "3", "-o", str(tmp_path / "q.png")])
-    assert "What it does" not in capsys.readouterr().out
+def test_negative_seed_argument_rejected():
+    with pytest.raises(SystemExit) as exc:
+        main(["in.png", "-k", "2", "-o", "o.png", "--seed", "-1"])
+    assert exc.value.code == 2
 
 
 # --- Changing the image between rounds -----------------------------------------
@@ -311,13 +337,13 @@ def second_image(tmp_path):
 def test_change_image_after_a_result(tmp_path, input_image, second_image, answers, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     prompts = answers(
-        str(input_image), "3", "", "n", "n",  # first round: in.png, k=3
-        "i",  # change image
+        str(input_image), "3", KEEP, KEEP,  # first round: in.png, k=3
+        "2",  # What next -> choose another image
         "nope.png",  # bad path -> asked again
         str(second_image),
-        "",  # keep k=3
-        "2",  # same image, new k
-        "",  # quit
+        KEEP,  # keep k=3
+        "1", "2",  # What next -> another k: 2
+        QUIT,
     )
     assert main([]) == 0
     assert "How many colors (k)? [3] " in prompts
@@ -335,27 +361,79 @@ def test_change_image_after_custom_output_uses_default_names(
     tmp_path, input_image, second_image, answers, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    answers("n", "i", str(second_image), "4", "")
+    answers(KEEP, "2", str(second_image), "4", QUIT)
     assert main([str(input_image), "-k", "2", "-o", "art.png", "-i", "--no-compare"]) == 0
     assert (tmp_path / "art.png").exists()
     assert (tmp_path / "other_k4.png").exists()
 
 
-def test_next_menu_rejects_unknown_choice(tmp_path, input_image, answers, capsys):
-    answers("n", "xyz", "0", "q")
-    assert main([str(input_image), "-k", "2", "-o", str(tmp_path / "q.png"), "-i"]) == 0
-    captured = capsys.readouterr()
-    assert captured.err.count("is not a choice") == 2
-    assert "Bye!" in captured.out
-
-
 def test_ctrl_c_while_changing_image_quits_cleanly(tmp_path, input_image, answers, capsys):
-    answers("n", "i", KeyboardInterrupt())
+    answers(KEEP, "2", KeyboardInterrupt())
     assert main([str(input_image), "-k", "2", "-o", str(tmp_path / "q.png"), "-i"]) == 0
     assert "Bye!" in capsys.readouterr().out
 
 
-def test_intro_mentions_changing_image(tmp_path, input_image, answers, capsys):
-    answers("3", "n", "")
-    main([str(input_image), "-o", str(tmp_path / "q.png")])
-    assert "type i to switch to another" in capsys.readouterr().out
+# --- Intro text ----------------------------------------------------------------
+
+
+def test_intro_printed_before_first_question(tmp_path, input_image, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    seen_before_first_prompt = []
+    replies = iter([str(input_image), "2", KEEP, KEEP, QUIT])
+
+    def fake_input(prompt):
+        if not seen_before_first_prompt:
+            seen_before_first_prompt.append(capsys.readouterr().out)
+        return next(replies)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert main([]) == 0
+    intro = seen_before_first_prompt[0]
+    assert intro.startswith("+---")
+    assert "What it does:" in intro
+    for question in ["1. Image path", "2. Number of colors k", "3. Options", "4. Output file"]:
+        assert question in intro
+    assert "numbered menu" in intro
+
+
+def test_intro_lists_only_questions_that_will_be_asked(tmp_path, input_image, answers, capsys):
+    answers("3", KEEP, QUIT)
+    assert main([str(input_image), "-o", str(tmp_path / "q.png")]) == 0
+    intro = capsys.readouterr().out.split("Loaded")[0]
+    assert "1. Number of colors k" in intro and "2. Options" in intro
+    assert "Image path" not in intro and "Output file" not in intro
+
+
+def test_no_intro_when_quiet(tmp_path, input_image, answers, capsys):
+    answers("3", KEEP, QUIT)
+    main([str(input_image), "-o", str(tmp_path / "q.png"), "-q"])
+    assert "What it does" not in capsys.readouterr().out
+
+
+def test_no_intro_when_all_arguments_given(tmp_path, input_image, capsys, no_input):
+    main([str(input_image), "-k", "3", "-o", str(tmp_path / "q.png")])
+    assert "What it does" not in capsys.readouterr().out
+
+
+# --- Helpers -------------------------------------------------------------------
+
+
+def test_clean_path():
+    assert clean_path("'/a b/c.png'") == Path("/a b/c.png")
+    assert clean_path('"x.png"') == Path("x.png")
+    assert clean_path("~/p.png") == Path.home() / "p.png"
+
+
+@pytest.mark.parametrize("text", ["0", "-2", "abc", "", "1.5"])
+def test_parse_k_rejects(text):
+    with pytest.raises(ValueError):
+        parse_k(text)
+
+
+def test_parse_choices():
+    assert parse_choices("1 3", 5) == [1, 3]
+    assert parse_choices(" 3,1 , 3 ", 5) == [3, 1]
+    assert parse_choices("", 5) == []
+    for bad in ["0", "6", "x", "1 -2", "1.5"]:
+        with pytest.raises(ValueError):
+            parse_choices(bad, 5)

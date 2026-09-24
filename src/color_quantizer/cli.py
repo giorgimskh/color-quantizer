@@ -1,7 +1,9 @@
 """Command-line interface for color-quantizer.
 
-Anything not given as an argument is asked for interactively. When anything
-was asked (or ``-i`` is given), the CLI keeps offering to try another k.
+Anything not given as an argument is asked for interactively. In an
+interactive run the user also picks options from a numbered list after
+entering k, and after each result a numbered menu offers another k, another
+image, changing options, or quitting.
 """
 
 import argparse
@@ -9,6 +11,7 @@ import os
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -19,10 +22,11 @@ from color_quantizer.image_io import load_image, save_image
 from color_quantizer.interactive import (
     Cancelled,
     ask_image,
+    ask_int,
     ask_k,
-    ask_next,
+    ask_menu,
+    ask_multi,
     ask_output,
-    ask_yes_no,
     parse_k,
 )
 from color_quantizer.quantizer import (
@@ -42,6 +46,17 @@ def _positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
+def _non_negative_int(value: str) -> int:
+    """argparse type: an integer >= 0 (NumPy seeds cannot be negative)."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a whole number") from None
+    if n < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0, got {n}")
+    return n
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser for the ``quantize`` command."""
     parser = argparse.ArgumentParser(
@@ -57,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-k", "--colors", type=_positive_int, default=None, help="number of colors"
     )
     parser.add_argument("-o", "--output", type=Path, default=None, help="output image path")
-    parser.add_argument("--seed", type=int, default=None, help="random seed")
+    parser.add_argument("--seed", type=_non_negative_int, default=None, help="random seed (>= 0)")
     parser.add_argument(
         "--max-iter", type=_positive_int, default=100, help="max k-means iterations (default: 100)"
     )
@@ -80,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-i",
         "--interactive",
         action="store_true",
-        help="after each result, offer to try another k or change the image",
+        help="ask for options and show the what-next menu even when all arguments are given",
     )
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="only print saved files and errors"
@@ -104,24 +119,81 @@ def default_output(input_path: Path, k: int) -> Path:
     return Path(f"{input_path.stem}_k{k}.png")
 
 
+@dataclass
+class Options:
+    """Settings that can be changed from the options menu."""
+
+    seed: int | None
+    max_iter: int
+    palette: bool
+    compare: bool
+    show: bool
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "Options":
+        return cls(args.seed, args.max_iter, args.palette, not args.no_compare, args.show)
+
+    def items(self) -> list[str]:
+        """Menu lines showing each option's current value."""
+        yes_no = {True: "yes", False: "no"}
+        seed = "random" if self.seed is None else str(self.seed)
+        return [
+            f"Random seed             (now: {seed})",
+            f"Max k-means iterations  (now: {self.max_iter})",
+            f"Save palette image      (now: {yes_no[self.palette]})",
+            f"Save comparison image   (now: {yes_no[self.compare]})",
+            f"Open result in viewer   (now: {yes_no[self.show]})",
+        ]
+
+
+def choose_options(options: Options) -> Options:
+    """Let the user change any number of options from a numbered list."""
+    choices = ask_multi(
+        "\nOptions (yes/no options switch when picked; the others ask for a value):",
+        options.items(),
+    )
+    options = replace(options)
+    for choice in choices:
+        if choice == 1:
+            options.seed = ask_int("Random seed (whole number >= 0, Enter = random): ", 0, None)
+        elif choice == 2:
+            options.max_iter = ask_int(f"Max iterations [{options.max_iter}]: ", 1, options.max_iter)
+        elif choice == 3:
+            options.palette = not options.palette
+        elif choice == 4:
+            options.compare = not options.compare
+        elif choice == 5:
+            options.show = not options.show
+    if choices:
+        print("Options now:")
+        for line in options.items():
+            print(f"  - {line}")
+    return options
+
+
+NEXT_MENU = [
+    "Try a different number of colors (k) on this image",
+    "Choose another image",
+    "Change options (seed, iterations, palette, comparison, viewer)",
+    "Quit",
+]
+
+
 def build_intro(args: argparse.Namespace) -> str:
     """Explanation printed before the questions of an interactive run.
 
     Lists only the questions that will actually be asked, given ``args``.
     """
-    wizard = args.input is None or args.output is None
     questions = []
     if args.input is None:
         questions.append("Image path - you can drag the image into this terminal")
     if args.colors is None:
         questions.append("Number of colors k - e.g. 4 (bold poster look), 8, 16, 32 (subtle)")
+    questions.append(
+        "Options - pick any by number (seed, iterations, palette, comparison, viewer)"
+    )
     if args.output is None:
         questions.append("Output file - press Enter to keep the suggested name")
-    ask_palette = wizard and not args.palette
-    if ask_palette:
-        questions.append("Save the palette as an image too?")
-    if not args.show:
-        questions.append("Open the result in your image viewer?")
 
     title = f"color-quantizer {__version__} - reduce an image to k colors"
     lines = [
@@ -141,15 +213,12 @@ def build_intro(args: argparse.Namespace) -> str:
         lines.append("")
     lines.append("Files saved:")
     lines.append("  <output>.png           the image with k colors")
-    if not args.no_compare:
-        lines.append("  <output>_compare.png   original and result side by side")
-    if args.palette or ask_palette:
-        note = "" if args.palette else " (if you choose)"
-        lines.append(f"  <output>_palette.png   the k colors as swatches{note}")
+    lines.append("  <output>_compare.png   original and result side by side (option 4)")
+    lines.append("  <output>_palette.png   the k colors as swatches (option 3)")
     lines += [
         "",
-        "After each result you can try another k, or type i to switch to another",
-        "image. Ctrl+C quits at any time.",
+        "After each result a numbered menu lets you try another k, choose another",
+        "image, change options, or quit. Ctrl+C quits at any time.",
         "All options, for use without questions: quantize --help",
         "",
     ]
@@ -203,23 +272,22 @@ class Session:
             return self.n_pixels
         return k
 
-    def run(self, k: int, output: Path, save_palette: bool, show: bool) -> None:
+    def run(self, k: int, output: Path, options: Options) -> None:
         """Quantize to k colors, save the results and print a summary."""
-        args = self.args
         start = time.perf_counter()
         result = quantize_with_stats(
-            self.image, k, seed=args.seed, max_iter=args.max_iter, progress=self.say
+            self.image, k, seed=options.seed, max_iter=options.max_iter, progress=self.say
         )
         elapsed = time.perf_counter() - start
 
         save_image(result.image, output)
         print(f"Saved {k}-color image to {output}")
         comparison = side_by_side(self.image, result.image)
-        if not args.no_compare:
+        if options.compare:
             path = compare_path(output)
             save_image(comparison, path)
             print(f"Saved comparison (original | reconstructed) to {path}")
-        if save_palette:
+        if options.palette:
             path = palette_path(output)
             save_image(palette_image(result.palette), path)
             print(f"Saved palette to {path}")
@@ -231,14 +299,15 @@ class Session:
         for line in format_palette(result.palette, result.counts):
             self.say(line)
 
-        if show:
+        if options.show:
             Image.fromarray(comparison).show(title="original | reconstructed")
 
 
 def run(args: argparse.Namespace) -> int:
     """Gather missing values interactively, then quantize (possibly repeatedly)."""
-    wizard = args.input is None or args.output is None
-    interactive = wizard or args.colors is None or args.interactive
+    interactive = (
+        args.input is None or args.output is None or args.colors is None or args.interactive
+    )
     if interactive and not args.quiet:
         print(build_intro(args), flush=True)
 
@@ -251,30 +320,35 @@ def run(args: argparse.Namespace) -> int:
 
     k = args.colors if args.colors is not None else ask_k()
     k = session.clamp_k(k)
+    options = Options.from_args(args)
+    if interactive:
+        options = choose_options(options)
     output = args.output if args.output is not None else ask_output(default_output(input_path, k))
     output_is_default = output == default_output(input_path, k)
-    save_palette = args.palette or (wizard and ask_yes_no("Save palette image too?", default=False))
-    show = args.show or (interactive and ask_yes_no("Open result in image viewer?", default=True))
-
     base_output = output
+
     while True:
-        session.run(k, output, save_palette, show)
+        session.run(k, output, options)
         if not interactive:
             return 0
         try:
-            choice = ask_next()
-            if choice == "image":
+            while True:
+                choice = ask_menu("\nWhat next?", NEXT_MENU)
+                if choice != 3:
+                    break
+                options = choose_options(options)
+            if choice == 1:
+                k = ask_k(f"How many colors (k)? [{k}] ", default=k)
+            elif choice == 2:
                 input_path, image = ask_image()
                 session = Session(args, image, input_path)
                 session.describe()
                 k = ask_k(f"How many colors (k)? [{k}] ", default=k)
                 # Name outputs after the new image so earlier results are kept.
                 output_is_default = True
-            elif choice is not None:
-                k = choice
         except Cancelled:
-            choice = None
-        if choice is None:
+            choice = 4
+        if choice == 4:
             print("Bye!")
             return 0
         k = session.clamp_k(k)
