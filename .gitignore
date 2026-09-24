@@ -6,3 +6,7 @@ build/
 dist/
 .pytest_cache/
 output/
+
+# Local-only files
+CLAUDE.md
+docs/

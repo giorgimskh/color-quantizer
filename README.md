@@ -47,5 +47,3 @@ Saved palette to photo_4_palette.png
    with the original is saved next to it.
 
 A 6-megapixel image takes about 1–2 seconds.
-
-See [docs/design.md](docs/design.md) for the design and milestones.
